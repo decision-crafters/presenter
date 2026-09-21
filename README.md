@@ -124,16 +124,16 @@ Presenter is a local, event-driven pipeline built on LlamaIndex Workflows. A top
 
 ```mermaid
 flowchart LR
-  cli[run.py CLI] --> prov[providers.build_llm]
-  cli --> ing[ingest: repomix / local]
-  cli --> wf[PresenterWorkflow]
+  cli["run.py CLI"] --> prov["providers.build_llm"]
+  cli --> ing["ingest: repomix / local"]
+  cli --> wf["PresenterWorkflow"]
   ing --> wf
-  wf --> struct[structure + validate + update]
-  struct --> slide[slide_maker fan-out]
-  slide --> combine[combine_slides]
-  combine --> render[mmdc + mdslides + decktape]
-  cli -.guide/design.-> wf
-  wf -.--export-video.-> vid[Kokoro + ffmpeg -> mp4]
+  wf --> struct["structure + validate + update"]
+  struct --> slide["slide_maker fan-out"]
+  slide --> combine["combine_slides"]
+  combine --> render["mmdc + mdslides + decktape"]
+  cli -. "guide / design" .-> wf
+  wf -. "export-video" .-> vid["Kokoro + ffmpeg to mp4"]
 ```
 
 Key modules: `run.py` (CLI), `providers.py` (LLM factory), `ingest.py` (repomix + local ingestion), `guide.py` (content steering), `design.py` (DESIGN.md branding), `workflow.py` (`PresenterWorkflow`), `agents/` (structure and slide agents, Kokoro narrator, video workflow), `utils.py` (render fixes, diagram splitting, references slide).
