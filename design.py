@@ -15,6 +15,7 @@ before.
 """
 
 import os
+import re
 import shutil
 from dataclasses import dataclass, field
 from typing import Optional, Tuple
@@ -190,7 +191,10 @@ def branding_head(design: Design, bg_ref: Optional[str] = None) -> str:
 # reveal.js lays each slide out in a fixed 960x700 coordinate space (then scales
 # the whole slide to fit the window), so an absolute px cap in that space is
 # reliable, unlike vh which resolves against the un-scaled window.
-DEFAULT_DIAGRAM_MAX_HEIGHT = "460px"
+DEFAULT_DIAGRAM_MAX_HEIGHT = "400px"
+# Hard width cap (in the same 960x700 space) so a wide diagram -- e.g. a forced
+# ``flowchart LR`` -- shrinks predictably instead of spilling past the slide.
+DEFAULT_DIAGRAM_MAX_WIDTH = "900px"
 
 
 def _layout_style(design: Design) -> str:
@@ -206,10 +210,16 @@ def _layout_style(design: Design) -> str:
         or design.tokens.get("diagramMaxHeight")
         or DEFAULT_DIAGRAM_MAX_HEIGHT
     )
+    max_w = (
+        layout.get("diagramMaxWidth")
+        or design.tokens.get("diagramMaxWidth")
+        or DEFAULT_DIAGRAM_MAX_WIDTH
+    )
     return (
         "<style>\n"
-        ".reveal .slides img { max-width: 100%; max-height: "
-        f"{max_h}; width: auto; height: auto; object-fit: contain; }}\n"
+        ".reveal .slides img { max-width: min(100%, "
+        f"{max_w}); max-height: {max_h}; width: auto; height: auto; "
+        "object-fit: contain; }\n"
         "</style>\n"
     )
 
@@ -227,10 +237,28 @@ def _logo_div(design: Design, logo_ref: Optional[str]) -> str:
     )
 
 
-def apply_branding(output_dir: str, design: Optional[Design]) -> None:
-    """Fit diagrams to the slide, and (if a design is given) inject brand CSS,
-    a logo, and any local assets. Always runs -- the diagram-fit rule applies to
-    every deck, branded or not.
+def _footer_div(source: Optional[str]) -> str:
+    """A small fixed footer citing the source repo/URL on every slide. Only
+    rendered for an http(s) source; a GitHub URL is shortened to ``host/owner/repo``."""
+    if not source or not str(source).lower().startswith(("http://", "https://")):
+        return ""
+    label = re.sub(r"^https?://(www\.)?", "", source.strip()).rstrip("/")
+    parts = label.split("/")
+    if len(parts) > 3:  # host/owner/repo/... -> host/owner/repo
+        label = "/".join(parts[:3])
+    return (
+        '<div style="position:fixed;bottom:12px;left:16px;z-index:40;'
+        'font-size:14px;opacity:0.55;font-family:inherit;">'
+        f"{label}</div>"
+    )
+
+
+def apply_branding(
+    output_dir: str, design: Optional[Design], source: Optional[str] = None
+) -> None:
+    """Fit diagrams to the slide, add a source footer, and (if a design is given)
+    inject brand CSS, a logo, and any local assets. Always runs -- the
+    diagram-fit rule applies to every deck, branded or not.
     """
     design = design or Design()
     html_file = os.path.join(output_dir, "index.html")
@@ -247,15 +275,15 @@ def apply_branding(output_dir: str, design: Optional[Design]) -> None:
             shutil.copy(src, os.path.join(output_dir, os.path.basename(src)))
 
     head = _layout_style(design) + branding_head(design, bg_ref=bg_ref)
-    logo_html = _logo_div(design, logo_ref)
+    overlay_html = _logo_div(design, logo_ref) + _footer_div(source)
 
     with open(html_file, "r") as f:
         html = f.read()
     if "</head>" in html:
         html = html.replace("</head>", head + "</head>", 1)
-    if logo_html and '<div class="reveal">' in html:
+    if overlay_html and '<div class="reveal">' in html:
         html = html.replace(
-            '<div class="reveal">', '<div class="reveal">' + logo_html, 1
+            '<div class="reveal">', '<div class="reveal">' + overlay_html, 1
         )
     with open(html_file, "w") as f:
         f.write(html)

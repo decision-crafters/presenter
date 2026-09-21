@@ -17,7 +17,7 @@ import re
 import shutil
 import subprocess
 import tempfile
-from typing import TYPE_CHECKING, List
+from typing import TYPE_CHECKING, List, Optional
 
 if TYPE_CHECKING:
     from llama_index.core import Document
@@ -49,6 +49,10 @@ GITHUB_URL_RE = re.compile(
 
 # Doc-first glob set repomix packs from a remote repo (comma-separated).
 REPO_INCLUDE_GLOBS = "**/*.md,**/*.mdx,**/*.markdown,**/*.rst,**/*.txt"
+
+# Demo recordings (e.g. a VHS/asciinema terminal capture, or a screen recording)
+# worth embedding on a "Demo" slide. Extend this one set to support more formats.
+DEMO_MEDIA_EXTS = {".gif", ".mp4", ".webm"}
 
 
 def _is_github_url(source: str) -> bool:
@@ -195,6 +199,128 @@ def extract_reference_urls(docs, limit: int = 8) -> List[str]:
                 if len(out) >= limit:
                     return out
     return out
+
+
+_MD_IMG_RE = re.compile(r"!\[([^\]]*)\]\(\s*<?([^)\s>]+)>?[^)]*\)")
+_HTML_SRC_RE = re.compile(
+    r"""<(?:img|source|video)\b[^>]*\bsrc=["']([^"']+)["']""", re.IGNORECASE
+)
+_TAPE_OUTPUT_RE = re.compile(
+    r"""^\s*Output\s+["']?([^"'\n]+)["']?\s*$""", re.IGNORECASE | re.MULTILINE
+)
+
+
+def _demo_ext(url: str) -> str:
+    """Extension of a media URL/path, ignoring any ``?query``/``#fragment``."""
+    path = re.split(r"[?#]", url, 1)[0]
+    return os.path.splitext(path)[1].lower()
+
+
+def extract_demo_media(docs, source: str = None) -> "List[dict]":
+    """Find demo recordings (GIF/MP4/WebM) to embed on a Demo slide.
+
+    Two general signals, neither tied to any one repo:
+      1. Media embedded in the ingested doc text (``![alt](url.gif)`` or an
+         ``<img/video src=...>``) whose URL ends in a :data:`DEMO_MEDIA_EXTS`
+         extension -- the common README convention (VHS, asciinema, screen caps).
+      2. For a *local* folder source (which, unlike a packed GitHub repo, exposes
+         a real file walk): any on-disk ``*.gif``/``*.mp4``/``*.webm``, plus the
+         rendered target named by a VHS ``*.tape`` file's ``Output "..."``.
+
+    Returns a de-duplicated ``[{"title", "url"}]`` where ``url`` is an http(s)
+    link or a local path (the download step handles both).
+    """
+    items: "List[dict]" = []
+    seen = set()
+
+    def add(title: str, url: str) -> None:
+        if not url or url in seen:
+            return
+        seen.add(url)
+        items.append({"title": (title or "").strip() or "Demo", "url": url})
+
+    for d in docs:
+        text = getattr(d, "text", "") or ""
+        for m in _MD_IMG_RE.finditer(text):
+            if _demo_ext(m.group(2)) in DEMO_MEDIA_EXTS:
+                add(m.group(1), m.group(2))
+        for m in _HTML_SRC_RE.finditer(text):
+            if _demo_ext(m.group(1)) in DEMO_MEDIA_EXTS:
+                add("Demo", m.group(1))
+
+    if source and not _is_github_url(source) and os.path.isdir(source):
+        for dirpath, dirnames, filenames in os.walk(source):
+            dirnames[:] = [x for x in dirnames if x not in EXCLUDE_DIRS]
+            for name in filenames:
+                ext = os.path.splitext(name)[1].lower()
+                full = os.path.join(dirpath, name)
+                if ext in DEMO_MEDIA_EXTS:
+                    add(os.path.splitext(name)[0], full)
+                elif ext == ".tape":
+                    out = _tape_output_path(full, source)
+                    if out:
+                        add(os.path.splitext(os.path.basename(out))[0], out)
+    return items
+
+
+def fetch_repo_tape(source: str, basename: str) -> Optional[str]:
+    """Fetch a VHS ``<basename>.tape`` from a GitHub repo (the typed commands),
+    so a demo walkthrough can describe the real steps. Uses ``gh`` (authed);
+    returns None on any failure — the walkthrough then falls back to context."""
+    import base64
+    import shutil
+
+    if not _is_github_url(source) or not shutil.which("gh"):
+        return None
+    m = re.search(r"github\.com[/:]([^/]+)/([^/#?]+)", source)
+    if not m:
+        return None
+    owner, repo = m.group(1), re.sub(r"\.git$", "", m.group(2))
+    try:
+        tree = subprocess.run(
+            ["gh", "api", f"repos/{owner}/{repo}/git/trees/HEAD?recursive=1",
+             "--jq", ".tree[].path"],
+            capture_output=True, text=True, timeout=30,
+        )
+        if tree.returncode != 0:
+            return None
+        paths = [p for p in tree.stdout.splitlines() if p.endswith(f"{basename}.tape")]
+        if not paths:
+            return None
+        content = subprocess.run(
+            ["gh", "api", f"repos/{owner}/{repo}/contents/{paths[0]}", "--jq", ".content"],
+            capture_output=True, text=True, timeout=30,
+        )
+        if content.returncode != 0:
+            return None
+        return base64.b64decode(content.stdout).decode("utf-8", "ignore")
+    except Exception:
+        return None
+
+
+def _tape_output_path(tape_file: str, root: str):
+    """Resolve the rendered file named by a VHS tape's ``Output`` directive, if
+    it exists on disk. The path may be written relative to the repo root or to
+    the tape's own directory, so try both."""
+    try:
+        with open(tape_file, "r", errors="ignore") as f:
+            match = _TAPE_OUTPUT_RE.search(f.read())
+    except OSError:
+        return None
+    if not match:
+        return None
+    rel = match.group(1).strip()
+    if _demo_ext(rel) not in DEMO_MEDIA_EXTS:
+        return None
+    tape_dir = os.path.dirname(tape_file)
+    for cand in (
+        os.path.normpath(os.path.join(tape_dir, rel)),
+        os.path.normpath(os.path.join(root, rel)),
+        os.path.join(tape_dir, os.path.basename(rel)),
+    ):
+        if os.path.exists(cand):
+            return cand
+    return None
 
 
 def load_source_documents(source: str) -> "List[Document]":

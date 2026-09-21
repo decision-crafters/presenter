@@ -19,6 +19,54 @@ from models import PresentationStructure
 from agents.narrator import narrate
 
 
+# Playback speed for the narration in the exported video. 1.0 = Kokoro's
+# natural speaking pace. Values > 1.0 speed it up (1.4 was the old hardcoded
+# default, which sounded rushed). The per-slide clip duration is derived from
+# this same constant so audio and video stay in sync — change it in one place.
+NARRATION_TEMPO = 1.0
+
+# Demo clips must match the narrated slide clips exactly (1280x720, h264/yuv420p,
+# 25fps, aac 48k stereo) so the final `concat -c copy` can stitch them without a
+# re-encode.
+DEMO_CLIP_VF = (
+    "scale=1280:720:force_original_aspect_ratio=decrease,"
+    "pad=1280:720:(ow-iw)/2:(oh-ih)/2:color=black,format=yuv420p,fps=25"
+)
+
+
+def _media_duration(path: str) -> float:
+    """Duration (seconds) of a media file via ffprobe, or 0.0 if unknown."""
+    try:
+        r = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "json", path],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        )
+        return float(json.loads(r.stdout)["format"]["duration"])
+    except Exception:
+        return 0.0
+
+
+def _build_demo_clip(media_path, caption_mp3, duration: float, out_file: str) -> bool:
+    """Render one demo recording as a 1280x720 clip matching the narrated clips.
+    The demo animates (looped to fill ``duration``); audio is the spoken caption
+    (padded with silence) or a silent stereo track. Returns True on success."""
+    cmd = ["ffmpeg", "-y", "-stream_loop", "-1", "-i", media_path]
+    if caption_mp3:
+        cmd += ["-i", caption_mp3, "-af", "apad"]
+    else:
+        cmd += ["-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo"]
+    cmd += [
+        "-t", f"{duration:.3f}", "-vf", DEMO_CLIP_VF,
+        "-map", "0:v:0", "-map", "1:a:0",
+        "-c:v", "libx264", "-pix_fmt", "yuv420p",
+        "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2",
+        out_file,
+    ]
+    r = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    return r.returncode == 0 and os.path.exists(out_file)
+
+
 class NarrationRequestReceived(Event):
     slide_index: int
 
@@ -38,11 +86,14 @@ class PresenterVideoCreaterWorkflow(Workflow):
         *args: Any,
         voice: str,
         lang_code: str = "a",
+        pronunciations: dict = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
         self.voice = voice
         self.lang_code = lang_code
+        # Persona pronunciation lexicon applied to narration/captions before TTS.
+        self.pronunciations = pronunciations or {}
 
     @step
     async def start(
@@ -76,7 +127,8 @@ class PresenterVideoCreaterWorkflow(Workflow):
         with open(narration_file, "r") as f:
             narration = f.read()
         await narrate(
-            narration, self.voice, narration_audio_file, lang_code=self.lang_code
+            narration, self.voice, narration_audio_file,
+            lang_code=self.lang_code, pronunciations=self.pronunciations,
         )
         return SlideNarrated(slide_index=slide_index)
 
@@ -112,16 +164,62 @@ class PresenterVideoCreaterWorkflow(Workflow):
             text=True,
         )
         output = json.loads(result.stdout)
-        duration = float(output["format"]["duration"]) / 1.4 + 0.5
+        duration = float(output["format"]["duration"]) / NARRATION_TEMPO + 0.5
         subprocess.run(
             shlex.split(
-                f"""ffmpeg -loop 1 -i {slide_ss_file} -i {slide_audio_file} -c:v libx264 -c:a aac -b:a 192k -shortest -t {duration} -vf "format=yuv420p" -filter:a "atempo=1.4" {slide_clip_file}"""
+                f"""ffmpeg -loop 1 -i {slide_ss_file} -i {slide_audio_file} -c:v libx264 -c:a aac -b:a 192k -ar 48000 -ac 2 -shortest -t {duration} -vf "format=yuv420p" -filter:a "atempo={NARRATION_TEMPO}" {slide_clip_file}"""
             ),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
         print(f"\n> Created clip for slide_{slide_index}\n")
         return SlideClipCreated(slide_index=slide_index, clip_file=slide_clip_file)
+
+    async def _build_demo_clips(self, presentation_dir: str):
+        """Render an animated clip per detected demo (from demos.json), appended
+        after the narrated slides so the video actually plays the demos. Returns
+        clip paths relative to ``presentation_dir`` for the concat list."""
+        demos_file = os.path.join(presentation_dir, "demos.json")
+        if not os.path.exists(demos_file):
+            return []
+        try:
+            with open(demos_file) as f:
+                demos = json.load(f)
+        except Exception:
+            return []
+        media_dir = os.path.join(presentation_dir, "media")
+        rels = []
+        for idx, demo in enumerate(demos):
+            media_path = os.path.join(media_dir, demo.get("file", ""))
+            if not demo.get("file") or not os.path.exists(media_path):
+                continue
+            clip_file = os.path.join(presentation_dir, f"demo_{idx}.mp4")
+            if not os.path.exists(clip_file):
+                print(f"\n> Creating demo clip {idx}: {demo.get('title')}\n")
+                # Prefer the runtime-sized walkthrough written at deck build; fall
+                # back to a short title caption if none is present.
+                script = demo.get("narration") or f"Demo: {demo.get('title') or 'demo'}"
+                caption_mp3 = os.path.join(presentation_dir, f"demo_{idx}_caption.mp3")
+                try:
+                    await narrate(
+                        script, self.voice, caption_mp3, lang_code=self.lang_code,
+                        pronunciations=self.pronunciations,
+                    )
+                except Exception:
+                    caption_mp3 = None
+                if caption_mp3 and not os.path.exists(caption_mp3):
+                    caption_mp3 = None
+                # Clip length = whichever is longer, so the walkthrough is never
+                # cut off and the demo GIF loops to fill any remainder.
+                duration = max(
+                    _media_duration(media_path),
+                    _media_duration(caption_mp3) if caption_mp3 else 0.0,
+                    2.0,
+                )
+                if not _build_demo_clip(media_path, caption_mp3, duration, clip_file):
+                    continue
+            rels.append(os.path.relpath(clip_file, presentation_dir))
+        return rels
 
     @step
     async def combine_clips(self, ctx: Context, ev: SlideClipCreated) -> StopEvent:
@@ -135,6 +233,9 @@ class PresenterVideoCreaterWorkflow(Workflow):
         for i in range(num_slides):
             clip_file = os.path.join(f"slide_{i}", "clip.mp4")
             clips.append(f"file '{clip_file}'")
+        # Append animated demo clips (if any) after the narrated slides.
+        for demo_rel in await self._build_demo_clips(presentation_dir):
+            clips.append(f"file '{demo_rel}'")
         with open(all_clips_file, "w") as f:
             f.write("\n".join(clips))
         presentation_video_file = os.path.join(presentation_dir, "presentation.mp4")
