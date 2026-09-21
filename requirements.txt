@@ -1,7 +1,16 @@
-llama-index-core==0.11.11
-llama-index-embeddings-openai==0.2.5
-llama-index-llms-openai==0.2.9
-llama-index-utils-workflow==0.2.1
-python-dotenv==1.0.1
-elevenlabs==1.50.3
-llama-parse==0.5.20
+# Core + workflows (llama-index 0.14.x; workflows engine is re-exported by core)
+llama-index-core>=0.14.0,<0.15.0
+llama-index-utils-workflow>=0.3.0
+llama-index-readers-file>=0.4.0
+
+# LLM providers (selected at runtime via --provider)
+llama-index-llms-ollama>=0.11.0
+llama-index-llms-openai-like>=0.3.0
+llama-index-llms-openai>=0.3.0
+
+# Offline text-to-speech
+kokoro>=0.9.0
+soundfile>=0.12.1
+numpy
+
+python-dotenv>=1.0.1

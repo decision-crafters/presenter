@@ -36,28 +36,28 @@ class PresenterVideoCreaterWorkflow(Workflow):
     def __init__(
         self,
         *args: Any,
-        model: str,
         voice: str,
+        lang_code: str = "a",
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
-        self.model = model
         self.voice = voice
+        self.lang_code = lang_code
 
     @step
     async def start(
         self, ctx: Context, ev: StartEvent
     ) -> NarrationRequestReceived | StopEvent:
         presentation_dir = ev.presentation_dir
-        await ctx.set("presentation_dir", presentation_dir)
+        await ctx.store.set("presentation_dir", presentation_dir)
         structure_file = os.path.join(presentation_dir, "structure.pkl")
         if not os.path.exists(structure_file):
             return StopEvent(result="No structure found")
         with open(structure_file, "rb") as f:
             structure: PresentationStructure = pickle.load(f)
-        await ctx.set("structure", structure)
+        await ctx.store.set("structure", structure)
         slides = structure.slides
-        await ctx.set("num_slides", len(slides))
+        await ctx.store.set("num_slides", len(slides))
         for i in range(len(slides)):
             ctx.send_event(NarrationRequestReceived(slide_index=i))
 
@@ -66,7 +66,7 @@ class PresenterVideoCreaterWorkflow(Workflow):
         self, ctx: Context, ev: NarrationRequestReceived
     ) -> SlideNarrated:
         slide_index = ev.slide_index
-        presentation_dir = await ctx.get("presentation_dir")
+        presentation_dir = await ctx.store.get("presentation_dir")
         slide_dir = os.path.join(presentation_dir, f"slide_{slide_index}")
         narration_file = os.path.join(slide_dir, "narration.txt")
         narration_audio_file = os.path.join(slide_dir, "narration.mp3")
@@ -75,7 +75,9 @@ class PresenterVideoCreaterWorkflow(Workflow):
             return SlideNarrated(slide_index=slide_index)
         with open(narration_file, "r") as f:
             narration = f.read()
-        await narrate(narration, self.voice, self.model, narration_audio_file)
+        await narrate(
+            narration, self.voice, narration_audio_file, lang_code=self.lang_code
+        )
         return SlideNarrated(slide_index=slide_index)
 
     @step(num_workers=5, retry_policy=ConstantDelayRetryPolicy())
@@ -83,7 +85,7 @@ class PresenterVideoCreaterWorkflow(Workflow):
         self, ctx: Context, ev: SlideNarrated
     ) -> SlideClipCreated:
         slide_index = ev.slide_index
-        presentation_dir = await ctx.get("presentation_dir")
+        presentation_dir = await ctx.store.get("presentation_dir")
         slide_dir = os.path.join(presentation_dir, f"slide_{slide_index}")
         slide_clip_file = os.path.join(slide_dir, "clip.mp4")
         print(f"\n> Creating clip for slide_{slide_index}\n")
@@ -123,8 +125,8 @@ class PresenterVideoCreaterWorkflow(Workflow):
 
     @step
     async def combine_clips(self, ctx: Context, ev: SlideClipCreated) -> StopEvent:
-        num_slides = await ctx.get("num_slides")
-        presentation_dir = await ctx.get("presentation_dir")
+        num_slides = await ctx.store.get("num_slides")
+        presentation_dir = await ctx.store.get("presentation_dir")
         events = ctx.collect_events(ev, [SlideClipCreated] * num_slides)
         if not events:
             return None

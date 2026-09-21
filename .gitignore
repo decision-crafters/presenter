@@ -153,3 +153,11 @@ cython_debug/
 #.idea/
 
 presentations/
+testing/
+
+# A personal brand file auto-applied to every deck; shared themes live in designs/
+/DESIGN.md
+
+# macOS + local tool artifacts
+.DS_Store
+.refact/
