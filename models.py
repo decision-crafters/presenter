@@ -42,3 +42,7 @@ class Slide(BaseModel):
         ...,
         description="Narration for the slide. The content should be narrated in 40-60 seconds",
     )
+    image_query: Optional[str] = Field(
+        None,
+        description="Optional short search phrase or prompt for a supporting photo, only when a picture would strengthen the slide and it has no diagram",
+    )
