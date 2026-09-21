@@ -5,13 +5,18 @@ from llama_index.core.prompts.base import PromptTemplate
 from models import PresentationStructure, StructureFeedback
 
 PRESENTATION_STRUCTURE_VALIDATOR_PROMPT = """
-you are world's best presentation creator with 10 years of experience, you've created hundreds of perfect presentations and every single one of them kept the audience captive for the whole time. your apprentice prepared a presentation structure, and you need to make sure all the slides contain just one atomic core idea and their content can be narrated under 40-50 seconds. If you think some slides are too broad, you must ask the apprentice to break them down into separate multiple smaller atomic slides without breaking the flow and you must tell them what those updated atomic slides should contain.
+you are world's best presentation creator with 10 years of experience, you've created hundreds of perfect presentations and every single one of them kept the audience captive for the whole time. your apprentice prepared a presentation structure. Review it against these criteria:
+1. Atomicity: each slide must contain just ONE atomic core idea that can be narrated in 40-50 seconds. If a slide is too broad, it must be broken into smaller atomic slides.
+2. Hook: the presentation must open by framing the problem and why it matters (a hook), NOT with an agenda, a table of contents, or a "what I'll cover" slide.
+3. Concrete example first: it should lead with a concrete, tangible example before the abstract/general idea.
+4. Depth over breadth: it should go DEEP on the single most important mechanism rather than skim the whole topic with shallow slides. Spending SEVERAL atomic slides on that one core mechanism is GOOD -- do NOT ask for it to be flattened or generalized; that is the intended deep dive.
+5. Zoom out: it should end on the impact / the one-sentence key takeaway.
 The presentation on the topic: "{topic}"
 Here is the initial structure the apprentice created:
 ---
 {structure}
 ---
-Now think very closely about all the slides above, and tell me if some of those slides are broad and need to be broken down into multiple separate slides or not. if not and if all of them are perfectly atomic, that's good otherwise just tell the which slides needs to broken down and how without breaking the flow.
+Now think closely about the slides above. If they satisfy all five criteria, the structure is perfect. Otherwise, tell the apprentice exactly which slides are too broad and how to break them down, and/or which of the hook / concrete-example-first / deep-dive / zoom-out criteria are missing and how to fix them -- all without breaking the flow.
 """
 
 

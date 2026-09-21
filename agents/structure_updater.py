@@ -14,7 +14,7 @@ But you have made some mistakes, some slides are too broad and does not represen
 ---
 {feedback}
 ---
-Now read the feedback carefully and resolve every single issue mentioned in the feedback without breaking the flow. Make sure all the issues are addressed and the structure is perfect. Each slide must contain one atomic core idea and can be narrated in 40-50 seconds. Now give me the updated structure for the presentation without breaking the flow of the slides.
+Now read the feedback carefully and resolve every single issue mentioned in the feedback without breaking the flow. Make sure all the issues are addressed and the structure is perfect. Each slide must contain one atomic core idea and can be narrated in 40-50 seconds. While fixing, preserve the Hook -> Pivot -> Deep Dive -> Zoom Out flow: keep the opening hook (never an agenda), keep leading with a concrete example before the abstraction, and keep the deep dive on the one core mechanism -- do NOT flatten it into shallow coverage of everything. Now give me the updated structure for the presentation without breaking the flow of the slides.
 """
 
 

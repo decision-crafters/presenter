@@ -1,10 +1,8 @@
 import os
 import subprocess
 import pickle
-from typing import Any, List
+from typing import Any, List, Optional
 
-from llama_parse import LlamaParse
-from llama_index.core import SimpleDirectoryReader
 from llama_index.core.llms.llm import LLM
 from llama_index.core.workflow import (
     step,
@@ -22,10 +20,17 @@ from agents.structure_validator import validate_presentation_structure
 from agents.structure_updater import update_presentation_structure
 from agents.slide_maker import compose_slide
 from agents.structure_creater_from_data import create_presentation_structure_from_data
-from utils import get_presentation_config, get_safe_foldername, sanitize_markdown
+from ingest import load_source_documents, extract_reference_urls
+from design import Design, reveal_config_lines, apply_branding
+from utils import (
+    get_safe_foldername,
+    sanitize_markdown,
+    split_oversized_diagrams,
+    references_slide,
+)
 
 
-class DataFolderFound(Event):
+class SourceProvided(Event):
     pass
 
 
@@ -66,44 +71,51 @@ class PresenterWorkflow(Workflow):
         self,
         *args: Any,
         llm: LLM,
+        target_slides: int = 15,
+        guide: str = "",
+        design: Optional[Design] = None,
+        split_diagrams: bool = True,
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
         self.llm = llm
+        self.target_slides = target_slides
+        self.guide = guide
+        self.design = design
+        self.split_diagrams = split_diagrams
 
     @step
-    async def start(self, ctx: Context, ev: StartEvent) -> TopicFound | DataFolderFound:
-        data_folder = os.path.join("data")
-        # check if data folder exists and is not empty
-        if os.path.exists(data_folder) and os.listdir(data_folder):
-            await ctx.set("data_folder", data_folder)
-            return DataFolderFound
+    async def start(self, ctx: Context, ev: StartEvent) -> TopicFound | SourceProvided:
+        # A --source (GitHub repo or local Markdown/PDF path) routes to the
+        # data-driven ingest branch; otherwise build from the topic string.
+        await ctx.store.set("reference_urls", [])
+        source = getattr(ev, "source", None)
+        await ctx.store.set("source", source)
+        if source:
+            return SourceProvided()
         topic = ev.query
-        await ctx.set("topic", topic)
-        return TopicFound
+        await ctx.store.set("topic", topic)
+        return TopicFound()
 
     @step
-    async def ingest_data_and_find_topic(
-        self, ctx: Context, ev: DataFolderFound
-    ) -> TopicFound:
-        data_folder = os.path.join("data")
-        # read all files in the data folder
-        parser = LlamaParse(result_type="markdown")
-        file_extractor = {".pdf": parser}
-        documents = SimpleDirectoryReader(
-            file_extractor=file_extractor, input_dir=data_folder
-        ).load_data()
-        presentation_structure_with_title = create_presentation_structure_from_data(
-            documents, self.llm
+    async def ingest_source_and_build_structure(
+        self, ctx: Context, ev: SourceProvided
+    ) -> StructureFinalized:
+        source = await ctx.store.get("source")
+        documents = load_source_documents(source)
+        await ctx.store.set("reference_urls", extract_reference_urls(documents))
+        structure_with_title = create_presentation_structure_from_data(
+            documents, self.llm, self.target_slides, self.guide
         )
-        await ctx.set("topic", presentation_structure_with_title.title)
-        structure = PresentationStructure(
-            slides=presentation_structure_with_title.slides
-        )
+        topic = structure_with_title.title
+        await ctx.store.set("topic", topic)
 
-        structure_file = os.path.join(
-            await ctx.get("presentation_folder"), "structure.pkl"
-        )
+        presentation_folder = os.path.join("presentations", get_safe_foldername(topic))
+        await ctx.store.set("presentation_folder", presentation_folder)
+        os.makedirs(presentation_folder, exist_ok=True)
+
+        structure = PresentationStructure(slides=structure_with_title.slides)
+        structure_file = os.path.join(presentation_folder, "structure.pkl")
         with open(structure_file, "wb") as f:
             pickle.dump(structure, f)
         return StructureFinalized(structure=structure)
@@ -111,10 +123,10 @@ class PresenterWorkflow(Workflow):
     @step
     async def prepare_presentation_folder(
         self, ctx: Context, ev: TopicFound
-    ) -> StructureRequestReceived:
-        topic = await ctx.get("topic")
+    ) -> StructureRequestReceived | StructureFinalized:
+        topic = await ctx.store.get("topic")
         presentation_folder = os.path.join("presentations", get_safe_foldername(topic))
-        await ctx.set("presentation_folder", presentation_folder)
+        await ctx.store.set("presentation_folder", presentation_folder)
         if not os.path.exists(presentation_folder):
             os.makedirs(presentation_folder)
         structure_file = os.path.join(presentation_folder, "structure.pkl")
@@ -133,7 +145,9 @@ class PresenterWorkflow(Workflow):
         self, ctx: Context, ev: StructureRequestReceived
     ) -> ValidateStructureRequestReceived:
         topic = ev.topic
-        initial_structure = create_presentation_structure(topic, self.llm)
+        initial_structure = create_presentation_structure(
+            topic, self.llm, self.target_slides, self.guide
+        )
         return ValidateStructureRequestReceived(structure=initial_structure)
 
     @step
@@ -141,7 +155,7 @@ class PresenterWorkflow(Workflow):
         self, ctx: Context, ev: ValidateStructureRequestReceived
     ) -> UpdateStructureRequestReceived | StructureFinalized:
         structure = ev.structure
-        topic = await ctx.get("topic")
+        topic = await ctx.store.get("topic")
         feedback = validate_presentation_structure(topic, structure, self.llm)
         if feedback.is_perfect:
             return StructureFinalized(structure=structure)
@@ -153,13 +167,13 @@ class PresenterWorkflow(Workflow):
     ) -> StructureFinalized:
         structure = ev.structure
         feedback = ev.feedback
-        topic = await ctx.get("topic")
+        topic = await ctx.store.get("topic")
         updated_structure = update_presentation_structure(
             topic, structure, feedback, self.llm
         )
         # pickle the structure in the presentation folder
         structure_file = os.path.join(
-            await ctx.get("presentation_folder"), "structure.pkl"
+            await ctx.store.get("presentation_folder"), "structure.pkl"
         )
         with open(structure_file, "wb") as f:
             pickle.dump(updated_structure, f)
@@ -170,8 +184,8 @@ class PresenterWorkflow(Workflow):
         self, ctx: Context, ev: StructureFinalized
     ) -> ComposeSlideRequestReceived:
         structure = ev.structure
-        await ctx.set("structure", structure)
-        await ctx.set("num_slides", len(structure.slides))
+        await ctx.store.set("structure", structure)
+        await ctx.store.set("num_slides", len(structure.slides))
         for slide_index, slide in enumerate(structure.slides):
             ctx.send_event(
                 ComposeSlideRequestReceived(slide_index=slide_index, slide_info=slide)
@@ -184,7 +198,7 @@ class PresenterWorkflow(Workflow):
         slide_index = ev.slide_index
         slide_info = ev.slide_info
         print(f"\n> Creating slide: {slide_info.title}...\n")
-        presentation_folder = await ctx.get("presentation_folder")
+        presentation_folder = await ctx.store.get("presentation_folder")
         slide_folder = os.path.join(presentation_folder, f"slide_{slide_index}")
         if not os.path.exists(slide_folder):
             os.makedirs(slide_folder)
@@ -198,16 +212,18 @@ class PresenterWorkflow(Workflow):
             return SlideCreated(
                 slide_index=slide_index, content=content, narration=narration
             )
-        topic = await ctx.get("topic")
-        structure = await ctx.get("structure")
+        topic = await ctx.store.get("topic")
+        structure = await ctx.store.get("structure")
         slides_info: List[SlideInfo] = structure.slides
-        num_slides = await ctx.get("num_slides")
+        num_slides = await ctx.store.get("num_slides")
         prev_next_info = ""
         if slide_index > 0:
             prev_next_info += f'The previous slide is "{slides_info[slide_index-1].title}"({slides_info[slide_index-1].atomic_core_idea}). '
         if slide_index < num_slides - 1:
             prev_next_info += f'The next slide is "{slides_info[slide_index+1].title}"({slides_info[slide_index+1].atomic_core_idea}). '
-        slide = await compose_slide(topic, slide_info, prev_next_info, self.llm)
+        slide = await compose_slide(
+            topic, slide_info, prev_next_info, self.llm, self.guide
+        )
         content = slide.content
         narration = slide.narration
         with open(content_file, "w") as f:
@@ -220,8 +236,8 @@ class PresenterWorkflow(Workflow):
 
     @step
     async def combine_slides(self, ctx: Context, ev: SlideCreated) -> StopEvent:
-        num_slides = await ctx.get("num_slides")
-        presentation_folder = await ctx.get("presentation_folder")
+        num_slides = await ctx.store.get("num_slides")
+        presentation_folder = await ctx.store.get("presentation_folder")
         events = ctx.collect_events(ev, [SlideCreated] * num_slides)
         if events is None:
             return None
@@ -237,7 +253,7 @@ class PresenterWorkflow(Workflow):
             slides_separator.join(slides_list)
         )
         full_presentation_template = (
-            get_presentation_config() + full_presentation_template
+            reveal_config_lines(self.design) + full_presentation_template
         )
         template_file = os.path.join(presentation_folder, "presentation_template.md")
         with open(template_file, "w") as f:
@@ -266,6 +282,19 @@ class PresenterWorkflow(Workflow):
                     os.path.join(media_dir, filename),
                 )
 
+        # With diagrams rendered into media/, split any oversized one onto its
+        # own slide and append a References slide (source + reference URLs).
+        with open(presentation_file, "r") as f:
+            deck_md = f.read()
+        if self.split_diagrams:
+            deck_md = split_oversized_diagrams(deck_md, media_dir)
+        deck_md += references_slide(
+            await ctx.store.get("source"),
+            await ctx.store.get("reference_urls"),
+        )
+        with open(presentation_file, "w") as f:
+            f.write(deck_md)
+
         # using mdslides to render presentation
         print("\n> Rendering presentation...\n")
         output_dir = os.path.join(presentation_folder, "output")
@@ -281,6 +310,9 @@ class PresenterWorkflow(Workflow):
                 output_dir,
             ]
         )
+        # apply DESIGN.md branding (CSS + logo + assets) into the HTML before
+        # decktape, so the PDF inherits the same theme.
+        apply_branding(output_dir, self.design)
         print(
             f'\n> Presentation rendered. Run "open {html_file}" to view the presentation.\n'
         )
