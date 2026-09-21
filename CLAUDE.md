@@ -19,9 +19,11 @@ python run.py "observer design pattern"
 python run.py "observer design pattern" --export-video
 ```
 
+`run.py` takes a topic, `--source <repo-url|path>` (repo/Markdown/PDF; title and structure are derived from the source), or neither (prints the three input modes and exits non-zero). A successful run ends with a machine-readable `PRESENTER_RESULT {json}` line (`presentation_dir`/`html`/`pdf`/`mp4`); the render steps in `combine_slides` now verify their artifacts and raise (non-zero exit) if `mmdc`/`mdslides`/`decktape` produce nothing, rather than failing silently.
+
 There is no test suite, linter, or build step. Copy `.env.example` to `.env`; the default `ollama` provider needs no API keys (just a running Ollama daemon with a pulled model). Keys are only needed for `--provider ollama-cloud` (`OLLAMA_CLOUD_API_KEY`) or `--provider openai` (`OPENAI_API_KEY`).
 
-Common flags: `--source <path|github-url>` (build from a repo or Markdown/PDF instead of a topic), `--provider ollama|ollama-cloud|openai`, `--model <name>`, `--slides <n>` (target count, default 15 ≈ 15 min), `--guide <path>` (content steering file), `--design <path>` (DESIGN.md branding + voice), `--voice <kokoro-voice>`, `--export-video`.
+Common flags: `--source <path|github-url>` (build from a repo or Markdown/PDF instead of a topic), `--provider ollama|ollama-cloud|openai`, `--model <name>`, `--slides <n>` (target count, default 15 ≈ 15 min), `--guide <path>` (content steering file), `--design <path>` (DESIGN.md branding + voice), `--images <pollinations|pexels|picsum>` (optional inline slide photos), `--voice <kokoro-voice>`, `--export-video`.
 
 ### External CLI tools (must be installed and on PATH)
 
@@ -61,6 +63,10 @@ The LLM is built in one place — `build_llm(provider, model)` in `providers.py`
 - **Voice**: the DESIGN.md Markdown body is merged (in `run.py`) with the `--guide` body into the single steering string fed to the prompts — no agent changes.
 
 mdslides itself has no custom-CSS hook, so branding is applied by HTML post-processing rather than by forking mdslides (a deliberate, documented choice). Example themes live in `designs/`.
+
+### Optional inline images (`images.py`)
+
+When `--images <provider>` is set, `slide_maker` fills an optional `Slide.image_query` (only for a slide with no diagram; the prompt instruction is added only when images are enabled, so default output is unchanged). `compose_one_slide` persists the query to `slide_<i>/image_query.txt` (resumable) and carries it on `SlideCreated`. In `combine_slides`, `_fetch_slide_images` fetches each queried photo via `images.fetch_slide_image` (`pollinations` no-key, `pexels` keyed, `picsum` fallback) into `media/slide_<i>.jpg` — sequential, capped at `MAX_IMAGES`, resumable — and embeds it inline before the `Note:` block. Photos are `.jpg` and landscape, so `utils._IMG_RE` (png-only) never splits them; the `diagramMaxHeight` CSS still bounds them.
 
 ### Two input paths (decided in `PresenterWorkflow.start`)
 

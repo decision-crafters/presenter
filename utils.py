@@ -39,7 +39,9 @@ def sanitize_markdown(text: str) -> str:
     return result + "\n\n"
 
 
-_IMG_RE = re.compile(r"!\[[^\]]*\]\(\./media/([^)]+)\)")
+# Only Mermaid diagram PNGs are eligible for the own-slide split; fetched photos
+# (.jpg) stay inline with their slide text.
+_IMG_RE = re.compile(r"!\[[^\]]*\]\(\./media/([^)]+\.png)\)")
 _HEADING_RE = re.compile(r"^#{1,6}\s+.*$", re.MULTILINE)
 
 

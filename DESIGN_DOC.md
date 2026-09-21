@@ -118,6 +118,7 @@ The design rests on a small set of choices. Each is recorded as an ADR in sectio
 | `agents/video_creator.py` (`PresenterVideoCreaterWorkflow`) | Build per slide clips and concatenate the MP4. | FR-4 |
 | `models.py` | Pydantic types for structured output. | FR-1 |
 | `utils.py` | Markdown sanitizing, diagram splitting, references slide, config. | FR-3, FR-10 |
+| `images.py` | Fetch an optional inline photo per slide (Pollinations, Pexels, or Picsum), with a Picsum fallback. | FR-11 |
 
 ```mermaid
 flowchart TB
@@ -315,7 +316,7 @@ Runtime: one local Python process. No server and no database. Configuration come
 
 ### Functional requirements
 
-- FR-1 topic to deck. FR-2 source to deck. FR-3 HTML and PDF output. FR-4 narrated MP4. FR-5 content steering. FR-6 branding. FR-7 provider selection. FR-8 resumable runs. FR-9 reject thin sources. FR-10 cite sources.
+- FR-1 topic to deck. FR-2 source to deck. FR-3 HTML and PDF output. FR-4 narrated MP4. FR-5 content steering. FR-6 branding. FR-7 provider selection. FR-8 resumable runs. FR-9 reject thin sources. FR-10 cite sources. FR-11 optional inline slide images.
 
 ---
 
@@ -326,6 +327,7 @@ Runtime: one local Python process. No server and no database. Configuration come
 - The Python 3.11 pin is driven by `kokoro`. A future Kokoro release may lift it.
 - `sanitize_markdown` carries render specific fixes for Mermaid. These are brittle and tied to the current renderer versions.
 - Branding injection depends on stable anchors (`</head>`, `<div class="reveal">`) in the `mdslides` output.
+- The optional image feature depends on a third-party network service. Pollinations has no SLA, is slow (about 20 to 40 seconds per image), and returns occasional errors. Mitigation: the feature is opt-in, fetches are sequential and capped, results are cached, and Picsum is the fallback.
 
 ---
 

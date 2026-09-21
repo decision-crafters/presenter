@@ -1,6 +1,7 @@
 import os
 import subprocess
 import pickle
+import time
 from typing import Any, List, Optional
 
 from llama_index.core.llms.llm import LLM
@@ -22,6 +23,7 @@ from agents.slide_maker import compose_slide
 from agents.structure_creater_from_data import create_presentation_structure_from_data
 from ingest import load_source_documents, extract_reference_urls
 from design import Design, reveal_config_lines, apply_branding
+from images import fetch_slide_image, POLLINATIONS_DELAY, MAX_IMAGES
 from utils import (
     get_safe_foldername,
     sanitize_markdown,
@@ -64,6 +66,7 @@ class SlideCreated(Event):
     slide_index: int
     content: str
     narration: str
+    image_query: Optional[str] = None
 
 
 class PresenterWorkflow(Workflow):
@@ -75,6 +78,7 @@ class PresenterWorkflow(Workflow):
         guide: str = "",
         design: Optional[Design] = None,
         split_diagrams: bool = True,
+        images_provider: Optional[str] = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
@@ -83,6 +87,7 @@ class PresenterWorkflow(Workflow):
         self.guide = guide
         self.design = design
         self.split_diagrams = split_diagrams
+        self.images_provider = images_provider
 
     @step
     async def start(self, ctx: Context, ev: StartEvent) -> TopicFound | SourceProvided:
@@ -204,13 +209,21 @@ class PresenterWorkflow(Workflow):
             os.makedirs(slide_folder)
         content_file = os.path.join(slide_folder, "content.md")
         narration_file = os.path.join(slide_folder, "narration.txt")
+        image_query_file = os.path.join(slide_folder, "image_query.txt")
         if os.path.exists(content_file) and os.path.exists(narration_file):
             with open(content_file, "r") as f:
                 content = f.read()
             with open(narration_file, "r") as f:
                 narration = f.read()
+            image_query = None
+            if os.path.exists(image_query_file):
+                with open(image_query_file, "r") as f:
+                    image_query = f.read().strip() or None
             return SlideCreated(
-                slide_index=slide_index, content=content, narration=narration
+                slide_index=slide_index,
+                content=content,
+                narration=narration,
+                image_query=image_query,
             )
         topic = await ctx.store.get("topic")
         structure = await ctx.store.get("structure")
@@ -222,17 +235,61 @@ class PresenterWorkflow(Workflow):
         if slide_index < num_slides - 1:
             prev_next_info += f'The next slide is "{slides_info[slide_index+1].title}"({slides_info[slide_index+1].atomic_core_idea}). '
         slide = await compose_slide(
-            topic, slide_info, prev_next_info, self.llm, self.guide
+            topic,
+            slide_info,
+            prev_next_info,
+            self.llm,
+            self.guide,
+            images_enabled=bool(self.images_provider),
         )
         content = slide.content
         narration = slide.narration
+        image_query = (slide.image_query or "").strip() or None
         with open(content_file, "w") as f:
             f.write(content)
         with open(narration_file, "w") as f:
             f.write(narration)
+        if image_query:
+            with open(image_query_file, "w") as f:
+                f.write(image_query)
         return SlideCreated(
-            slide_index=slide_index, content=content, narration=narration
+            slide_index=slide_index,
+            content=content,
+            narration=narration,
+            image_query=image_query,
         )
+
+    def _fetch_slide_images(self, events, media_dir):
+        """Fetch a photo for each slide that requested one.
+
+        Returns {slide_index: inline-image markdown}. Sequential and capped, with
+        a delay for Pollinations' throttle, and resumable (skips a cached file).
+        """
+        result = {}
+        if not self.images_provider:
+            return result
+        queued = [
+            (e.slide_index, e.image_query)
+            for e in sorted(events, key=lambda x: x.slide_index)
+            if e.image_query
+        ]
+        fetched = 0
+        for idx, query in queued:
+            out_path = os.path.join(media_dir, f"slide_{idx}.jpg")
+            ref = f"\n\n![](./media/slide_{idx}.jpg)\n"
+            if os.path.exists(out_path):
+                result[idx] = ref
+                continue
+            if fetched >= MAX_IMAGES:
+                break
+            print(f"\n> Fetching image for slide {idx}: {query!r}\n")
+            ok = fetch_slide_image(query, self.images_provider, out_path, seed=idx)
+            if self.images_provider == "pollinations":
+                time.sleep(POLLINATIONS_DELAY)
+            if ok:
+                fetched += 1
+                result[idx] = ref
+        return result
 
     @step
     async def combine_slides(self, ctx: Context, ev: SlideCreated) -> StopEvent:
@@ -243,8 +300,14 @@ class PresenterWorkflow(Workflow):
             return None
 
         slide_created_events: List[SlideCreated] = events
+        media_dir = os.path.join(presentation_folder, "media")
+        os.makedirs(media_dir, exist_ok=True)
+        image_md = self._fetch_slide_images(slide_created_events, media_dir)
         slides_dict = {
-            ev.slide_index: f"{ev.content}\n\nNote:\n{ev.narration}\n"
+            ev.slide_index: (
+                f"{ev.content}{image_md.get(ev.slide_index, '')}"
+                f"\n\nNote:\n{ev.narration}\n"
+            )
             for ev in slide_created_events
         }
         slides_list = [slides_dict[i] for i in range(num_slides)]
@@ -262,9 +325,17 @@ class PresenterWorkflow(Workflow):
         # using mermaid-cli to render mermaid diagrams
         print("\n> Rendering diagrams...\n")
         presentation_file = os.path.join(presentation_folder, "presentation.md")
-        subprocess.run(
+        mmdc_result = subprocess.run(
             ["mmdc", "-i", template_file, "-o", presentation_file, "-e", "png"]
         )
+        if not os.path.exists(presentation_file):
+            raise RuntimeError(
+                f"Diagram render failed: mmdc produced no {presentation_file} "
+                f"(exit {mmdc_result.returncode}). Install @mermaid-js/mermaid-cli "
+                "and ensure `mmdc` is on PATH."
+            )
+        if mmdc_result.returncode != 0:
+            print("\n> Warning: mmdc reported errors; some diagrams may be missing.\n")
 
         with open(presentation_file, "r") as f:
             presentation_content = f.read()
@@ -300,7 +371,7 @@ class PresenterWorkflow(Workflow):
         output_dir = os.path.join(presentation_folder, "output")
         html_file = os.path.join(output_dir, "index.html")
         pdf_file = os.path.join(presentation_folder, "presentation.pdf")
-        subprocess.run(
+        mdslides_result = subprocess.run(
             [
                 "mdslides",
                 presentation_file,
@@ -310,6 +381,12 @@ class PresenterWorkflow(Workflow):
                 output_dir,
             ]
         )
+        if mdslides_result.returncode != 0 or not os.path.exists(html_file):
+            raise RuntimeError(
+                f"Render failed: mdslides did not produce {html_file} "
+                f"(exit {mdslides_result.returncode}). Install markdown-slides and "
+                "ensure `mdslides` is on PATH."
+            )
         # apply DESIGN.md branding (CSS + logo + assets) into the HTML before
         # decktape, so the PDF inherits the same theme.
         apply_branding(output_dir, self.design)
@@ -318,7 +395,7 @@ class PresenterWorkflow(Workflow):
         )
 
         print("\n> Exporting presentation to PDF...\n")
-        subprocess.run(
+        decktape_result = subprocess.run(
             [
                 "decktape",
                 "--headless=true",
@@ -329,6 +406,12 @@ class PresenterWorkflow(Workflow):
                 pdf_file,
             ]
         )
+        if decktape_result.returncode != 0 or not os.path.exists(pdf_file):
+            raise RuntimeError(
+                f"PDF export failed: decktape did not produce {pdf_file} "
+                f"(exit {decktape_result.returncode}). Install decktape (and its "
+                "Chrome) and ensure `decktape` is on PATH."
+            )
         print(f'\n> Exported presentation to PDF. Open it using "open {pdf_file}"\n')
 
         return StopEvent(result=presentation_folder)
