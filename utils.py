@@ -57,7 +57,9 @@ def _fix_timeline_periods(text: str) -> str:
     return re.sub(r"(?s)```mermaid(.*?)```", _fix_block, text)
 
 
-_IMG_RE = re.compile(r"!\[[^\]]*\]\(\./media/([^)]+)\)")
+# Only Mermaid diagram PNGs are eligible for the own-slide split; fetched photos
+# (.jpg) and demo GIFs stay with their own slide.
+_IMG_RE = re.compile(r"!\[[^\]]*\]\(\./media/([^)]+\.png)\)")
 _HEADING_RE = re.compile(r"^#{1,6}\s+.*$", re.MULTILINE)
 
 

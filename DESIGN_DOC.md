@@ -105,13 +105,13 @@ The design rests on a small set of choices. Each is recorded as an ADR in sectio
 
 | Building block | Responsibility | Requirements |
 |----------------|----------------|--------------|
-| `run.py` | Parse the CLI, build the provider, load guide, design, and persona, resolve voice and pronunciation precedence, run the workflows. | FR-1, FR-2, FR-4, FR-5, FR-6, FR-7, FR-11, FR-12 |
+| `run.py` | Parse the CLI, build the provider, load guide, design, and persona, resolve voice and pronunciation precedence, select the image provider, run the workflows. | FR-1, FR-2, FR-4, FR-5, FR-6, FR-7, FR-11, FR-12, FR-15 |
 | `providers.py` | `build_llm` returns an `LLM` for ollama, ollama-cloud, or openai. | FR-7 |
 | `ingest.py` | `load_source_documents` packs a repo or reads local files, caps and prioritizes text, rejects thin sources, extracts reference URLs, detects demo media (`extract_demo_media`), and fetches a repo VHS tape (`fetch_repo_tape`). | FR-2, FR-9, FR-10, FR-13 |
 | `guide.py` | Load a SKILL.md or AGENT.md guide and format it as a steering block. | FR-5 |
 | `design.py` | Parse a DESIGN.md, emit reveal config and brand CSS, inject branding, the diagram fit caps, and the source footer into the deck. | FR-6, FR-14 |
 | `persona.py` | `load_persona` reads a PERSONA.md, merges built-in pronunciations, and matches the voice to the declared gender. `select_persona` picks the best fit for `--persona auto`. `open_persona_gap_issue` files a gap issue. | FR-11, FR-12 |
-| `workflow.py` (`PresenterWorkflow`) | Orchestrate structure, validation, slide fan out, render, split, citation, demo download, walkthrough generation, and the closing CTA record. | FR-1, FR-2, FR-3, FR-8, FR-10, FR-13, FR-14 |
+| `workflow.py` (`PresenterWorkflow`) | Orchestrate structure, validation, slide fan out, render, split, citation, inline image fetch, demo download, walkthrough generation, and the closing CTA record. | FR-1, FR-2, FR-3, FR-8, FR-10, FR-13, FR-14, FR-15 |
 | `agents/structure_creater*.py` | Generate the slide structure from a topic or from source text. | FR-1, FR-2 |
 | `agents/structure_validator.py`, `structure_updater.py` | Critique and refine the structure. | FR-1 |
 | `agents/slide_maker.py` | Compose one slide and its narration. | FR-1 |
@@ -120,6 +120,7 @@ The design rests on a small set of choices. Each is recorded as an ADR in sectio
 | `agents/video_creator.py` (`PresenterVideoCreaterWorkflow`) | Build per slide clips, animated demo clips, and a closing CTA clip, then concatenate the MP4. | FR-4, FR-13, FR-14 |
 | `models.py` | Pydantic types for structured output. | FR-1 |
 | `utils.py` | Markdown sanitizing, diagram splitting, references slide, demo slides, CTA slide, config. | FR-3, FR-10, FR-13, FR-14 |
+| `images.py` | Fetch an optional inline photo per slide (Pollinations, Pexels, or Picsum), with a Picsum fallback. | FR-15 |
 
 ```mermaid
 flowchart TB
@@ -374,7 +375,7 @@ Runtime: one local Python process. No server and no database. Configuration come
 
 ### Functional requirements
 
-- FR-1 topic to deck. FR-2 source to deck. FR-3 HTML and PDF output. FR-4 narrated MP4. FR-5 content steering. FR-6 branding. FR-7 provider selection. FR-8 resumable runs. FR-9 reject thin sources. FR-10 cite sources. FR-11 persona selection and steering. FR-12 technical-term pronunciation. FR-13 demo embedding with a narrated walkthrough. FR-14 source footer and closing call-to-action.
+- FR-1 topic to deck. FR-2 source to deck. FR-3 HTML and PDF output. FR-4 narrated MP4. FR-5 content steering. FR-6 branding. FR-7 provider selection. FR-8 resumable runs. FR-9 reject thin sources. FR-10 cite sources. FR-11 persona selection and steering. FR-12 technical-term pronunciation. FR-13 demo embedding with a narrated walkthrough. FR-14 source footer and closing call-to-action. FR-15 optional inline slide images.
 
 ---
 
@@ -389,6 +390,7 @@ Runtime: one local Python process. No server and no database. Configuration come
 - The demo walkthrough length is an estimate. Kokoro speaking rate varies, so the narration can run a little longer or shorter than the demo. Mitigation: the clip length is the longer of the demo and the narration, and the demo loops to fill.
 - Demo detection reads the source README embed, and the tape fetch relies on `gh`. A repository that ships a tape but embeds no recording is not detected on the GitHub path.
 - The closing clip uses the CTA slide screenshot index recorded during the deck build. A change to the slide append order would move that index.
+- The optional image feature depends on a third-party network service. Pollinations has no SLA, is slow (about 20 to 40 seconds per image), and returns occasional errors. Mitigation: the feature is opt-in, fetches are sequential and capped, results are cached, and Picsum is the fallback.
 
 ---
 

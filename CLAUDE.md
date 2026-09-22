@@ -19,9 +19,11 @@ python run.py "observer design pattern"
 python run.py "observer design pattern" --export-video
 ```
 
+`run.py` takes a topic, `--source <repo-url|path>` (repo/Markdown/PDF; title and structure are derived from the source), or neither (prints the three input modes and exits non-zero). A successful run ends with a machine-readable `PRESENTER_RESULT {json}` line (`presentation_dir`/`html`/`pdf`/`mp4`); the render steps in `combine_slides` now verify their artifacts and raise (non-zero exit) if `mmdc`/`mdslides`/`decktape` produce nothing, rather than failing silently.
+
 There is no test suite, linter, or build step. Copy `.env.example` to `.env`; the default `ollama` provider needs no API keys (just a running Ollama daemon with a pulled model). Keys are only needed for `--provider ollama-cloud` (`OLLAMA_CLOUD_API_KEY`) or `--provider openai` (`OPENAI_API_KEY`).
 
-Common flags: `--source <path|github-url>` (build from a repo or Markdown/PDF instead of a topic), `--provider ollama|ollama-cloud|openai`, `--model <name>`, `--slides <n>` (target count, default 15 ≈ 15 min), `--guide <path>` (content steering file), `--design <path>` (DESIGN.md branding + voice), `--voice <kokoro-voice>`, `--export-video`.
+Common flags: `--source <path|github-url>` (build from a repo or Markdown/PDF instead of a topic), `--provider ollama|ollama-cloud|openai`, `--model <name>`, `--slides <n>` (target count, default 15 ≈ 15 min), `--guide <path>` (content steering file), `--design <path>` (DESIGN.md branding + voice), `--images <pollinations|pexels|picsum>` (optional inline slide photos), `--voice <kokoro-voice>`, `--export-video`.
 
 ### External CLI tools (must be installed and on PATH)
 
@@ -65,6 +67,14 @@ mdslides itself has no custom-CSS hook, so branding is applied by HTML post-proc
 ### Optional persona (`persona.py`)
 
 `load_persona(path)` reads a `PERSONA.md` (YAML frontmatter + Markdown body, same convention as guide/design) and returns a `Persona` that **unifies the three existing steering seams** so "who narrates and how they speak" is one declared artifact: the body becomes STEERING GUIDANCE (like `--guide`), `voice`/`lang` pick the Kokoro voice (like `--voice`/`--lang`), and `pronunciations` is a term→spoken-form lexicon. `run.py` resolves precedence **explicit CLI flag > persona > built-in default** and threads the pieces in (`steering` → `PresenterWorkflow`; `voice`/`lang`/`pronunciations` → `PresenterVideoCreaterWorkflow`). The lexicon is applied in `agents/narrator.apply_pronunciations` **inside `narrate()` right before Kokoro** (a word-boundary, case-insensitive substitution) — it fixes the *spoken* audio only, never the saved `narration.txt`, so on-screen notes keep the correct spelling. `BUILTIN_PRONUNCIATIONS` (~30 common terms: kubectl, yaml, k8s, json…) always applies even with no persona; a persona's entries override it per domain. All **additive/empty-safe**: no `--persona` → built-ins only, nothing else changes. `--persona auto` runs `select_persona` (one structured LLM call over the `personas/` catalog) and, on no fit with `--suggest-persona-issue`, `open_persona_gap_issue` files a `gh` issue (opt-in + confirmed). The library (`personas/`) is a small maintainable KB: `README.md` (schema/how-to), `index.md` (catalog), one `PERSONA.md` per persona. Ships Cloud Architect / DevOps Engineer / AI Engineer / Researcher / Technical Educator.
+
+### Optional inline images (`images.py`)
+
+When `--images <provider>` is set, `slide_maker` fills an optional `Slide.image_query` (only for a slide with no diagram; the prompt instruction is added only when images are enabled, so default output is unchanged). `compose_one_slide` persists the query to `slide_<i>/image_query.txt` (resumable) and carries it on `SlideCreated`. In `combine_slides`, `_fetch_slide_images` fetches each queried photo via `images.fetch_slide_image` (`pollinations` no-key, `pexels` keyed, `picsum` fallback) into `media/slide_<i>.jpg` — sequential, capped at `MAX_IMAGES`, resumable — and embeds it inline before the `Note:` block. Photos are `.jpg` and landscape, so `utils._IMG_RE` (png-only) never splits them; the `diagramMaxHeight` CSS still bounds them.
+
+### Optional narrated demos and closing CTA (`ingest.py`, `agents/demo_narrator.py`, `video_creator.py`)
+
+For a `--source` deck, `ingest.extract_demo_media` detects demo recordings embedded in the source README (`.gif`/`.mp4`/`.webm`; local folders also walk files and parse a VHS `.tape` `Output`). `combine_slides` downloads them into `media/`, appends a **Demo** slide per recording, writes `demos.json` with a runtime-sized spoken walkthrough (`agents/demo_narrator.write_demo_walkthrough`, grounded in the repo's `.tape` via `ingest.fetch_repo_tape`), and writes `closing.json` (the CTA slide's screenshot index + an outro). Every slide gets a source footer and the deck ends with a **Get the Code** CTA. In the video, `video_creator` splices each demo in as an animated clip with its walkthrough, then appends a **closing CTA clip** so the recording ends on the links. All empty-safe: no source/demos → nothing added.
 
 ### Two input paths (decided in `PresenterWorkflow.start`)
 

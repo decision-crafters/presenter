@@ -67,18 +67,20 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-- Run the workflow with the topic to create the presentation on
+- There are **three ways to build a deck** — run `python run.py` with no arguments (or `--help`) to see them:
 
 ```bash
+# 1. From a topic
 python run.py "observer design pattern"
-```
 
-- Or build a presentation from your own source — a GitHub repo or a local Markdown/PDF file or folder
-
-```bash
+# 2. From a GitHub repo  (title + structure are derived from the repo — no topic needed)
 python run.py --source https://github.com/owner/repo
-python run.py --source ./docs
+
+# 3. From your research / notes  (a Markdown/PDF file or a folder)
+python run.py --source ./research.md
 ```
+
+  With `--source` you don't supply a topic: Presenter reads the repo or documents and derives the presentation's title and structure itself. This is the fastest way to turn work you already have into a talk.
 
 - Choose a different LLM backend or model with `--provider` / `--model`
 
@@ -104,6 +106,21 @@ python run.py "observer design pattern" --design designs/sunrise
 
 Two rendering niceties apply automatically: a **tall Mermaid diagram is moved onto its own slide** so it isn't cut off (disabled under `--export-video`, which needs one slide per narration), and when a deck is built from `--source`, a **References** slide is appended citing the source repo/file and any reference URLs found in it.
 
+- Add inline slide photos with `--images` (off by default). The model proposes a picture only for slides that have no diagram, and the image is fetched into `media/` (resumable):
+
+```bash
+python run.py "the history of coffee" --images pollinations   # no API key
+python run.py "the history of coffee" --images pexels         # real photos, needs PEXELS_API_KEY
+```
+
+| Provider | Key | Notes |
+|---|---|---|
+| `pollinations` | none | AI-generated from a URL; slow (~20–40s/image), occasional 500s (falls back to Picsum); AI-generated imagery |
+| `pexels` | `PEXELS_API_KEY` | real stock photos; fast; Pexels License (attribution requested, not required) |
+| `picsum` | none | Lorem Picsum placeholders (random, not keyword-matched); also the automatic fallback |
+
+  Images are opt-in and networked; with no `--images` the deck is produced exactly as before.
+
 - Presentations are only as good as their source: when a `--source` repo/folder has too little documentation, the run is rejected with a clear message rather than producing a weak deck (add a README/docs and retry).
 
 - Pick a **persona** with `--persona` — a reusable bundle of a narrator voice, tone/style steering, and a **technical-term pronunciation lexicon** so the narration says `kubectl` as "koob control" and `yaml` as "yammel" (the slide text stays unchanged). Ready-made technical personas ship in `personas/` (Cloud Architect, DevOps Engineer, AI Engineer, Researcher, Technical Educator). `--persona auto` picks the best fit for your content; with `--suggest-persona-issue` it offers to file a "new persona needed" GitHub issue when nothing fits. Common terms are pronounced better even without a persona. See [`personas/README.md`](personas/README.md) for the format and how to add your own.
@@ -124,6 +141,7 @@ python run.py "observer design pattern" --export-video
 - The interactive HTML for the presentation will be at `presentations/<presentation_folder>/output/index.html`
 - The extracted PDF of the presentation will be at `presentations/<presentation_folder>/presentation.pdf`
 - The rendered video with voiceover of the presentation will be at `presentations/<presentation_folder>/presentation.mp4`
+- For scripting, the last line of a successful run is machine-readable: `PRESENTER_RESULT {"presentation_dir": ..., "html": ..., "pdf": ..., "mp4": ...}`. A broken render exits non-zero (no result line).
 
 ## Architecture
 
@@ -131,16 +149,16 @@ Presenter is a local, event-driven pipeline built on LlamaIndex Workflows. A top
 
 ```mermaid
 flowchart LR
-  cli[run.py CLI] --> prov[providers.build_llm]
-  cli --> ing[ingest: repomix / local]
-  cli --> wf[PresenterWorkflow]
+  cli["run.py CLI"] --> prov["providers.build_llm"]
+  cli --> ing["ingest: repomix / local"]
+  cli --> wf["PresenterWorkflow"]
   ing --> wf
-  wf --> struct[structure + validate + update]
-  struct --> slide[slide_maker fan-out]
-  slide --> combine[combine_slides]
-  combine --> render[mmdc + mdslides + decktape]
-  cli -.guide/design.-> wf
-  wf -.--export-video.-> vid[Kokoro + ffmpeg -> mp4]
+  wf --> struct["structure + validate + update"]
+  struct --> slide["slide_maker fan-out"]
+  slide --> combine["combine_slides"]
+  combine --> render["mmdc + mdslides + decktape"]
+  cli -. "guide / design" .-> wf
+  wf -. "export-video" .-> vid["Kokoro + ffmpeg to mp4"]
 ```
 
 Key modules: `run.py` (CLI), `providers.py` (LLM factory), `ingest.py` (repomix + local ingestion), `guide.py` (content steering), `design.py` (DESIGN.md branding), `workflow.py` (`PresenterWorkflow`), `agents/` (structure and slide agents, Kokoro narrator, video workflow), `utils.py` (render fixes, diagram splitting, references slide).
