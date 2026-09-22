@@ -221,6 +221,42 @@ class PresenterVideoCreaterWorkflow(Workflow):
             rels.append(os.path.relpath(clip_file, presentation_dir))
         return rels
 
+    async def _build_closing_clip(self, presentation_dir: str):
+        """Append a closing 'Get the Code' clip so every recording ends on the CTA
+        and its links. Reuses the branded CTA slide screenshot + a spoken outro.
+        Returns the clip path relative to ``presentation_dir``, or None."""
+        closing_file = os.path.join(presentation_dir, "closing.json")
+        if not os.path.exists(closing_file):
+            return None
+        try:
+            with open(closing_file) as f:
+                closing = json.load(f)
+        except Exception:
+            return None
+        idx = closing.get("screenshot_index")
+        shot = os.path.join(presentation_dir, f"presentation_{idx}_1280x720.png")
+        if not idx or not os.path.exists(shot):
+            print(f"\n> Closing CTA screenshot not found ({shot}); skipping.\n")
+            return None
+        clip_file = os.path.join(presentation_dir, "closing.mp4")
+        if not os.path.exists(clip_file):
+            print("\n> Creating closing CTA clip\n")
+            caption_mp3 = os.path.join(presentation_dir, "closing_caption.mp3")
+            try:
+                await narrate(
+                    closing.get("narration") or "Get the code linked on screen.",
+                    self.voice, caption_mp3, lang_code=self.lang_code,
+                    pronunciations=self.pronunciations,
+                )
+            except Exception:
+                caption_mp3 = None
+            if caption_mp3 and not os.path.exists(caption_mp3):
+                caption_mp3 = None
+            duration = max(_media_duration(caption_mp3) if caption_mp3 else 0.0, 4.0)
+            if not _build_demo_clip(shot, caption_mp3, duration, clip_file):
+                return None
+        return os.path.relpath(clip_file, presentation_dir)
+
     @step
     async def combine_clips(self, ctx: Context, ev: SlideClipCreated) -> StopEvent:
         num_slides = await ctx.store.get("num_slides")
@@ -236,6 +272,10 @@ class PresenterVideoCreaterWorkflow(Workflow):
         # Append animated demo clips (if any) after the narrated slides.
         for demo_rel in await self._build_demo_clips(presentation_dir):
             clips.append(f"file '{demo_rel}'")
+        # End every recording on the closing 'Get the Code' CTA clip.
+        closing_rel = await self._build_closing_clip(presentation_dir)
+        if closing_rel:
+            clips.append(f"file '{closing_rel}'")
         with open(all_clips_file, "w") as f:
             f.write("\n".join(clips))
         presentation_video_file = os.path.join(presentation_dir, "presentation.mp4")

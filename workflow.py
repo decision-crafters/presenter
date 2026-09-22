@@ -393,11 +393,30 @@ class PresenterWorkflow(Workflow):
             deck_md = f.read()
         if self.split_diagrams:
             deck_md = split_oversized_diagrams(deck_md, media_dir)
-        deck_md += demo_slides(demo_items)
-        deck_md += cta_slide(source, [d["url"] for d in demo_items])
-        deck_md += references_slide(source, await ctx.store.get("reference_urls"))
+        demo_md = demo_slides(demo_items)
+        cta_md = cta_slide(source, [d["url"] for d in demo_items])
+        ref_md = references_slide(source, await ctx.store.get("reference_urls"))
+        deck_md += demo_md + cta_md + ref_md
         with open(presentation_file, "w") as f:
             f.write(deck_md)
+
+        # The CTA slide is appended (not a narrated structure slide), so the video
+        # wouldn't include it. Record its screenshot index + an outro so the video
+        # workflow can append a closing clip — every recording ends on the links.
+        if cta_md:
+            from utils import SLIDES_SEPARATOR
+            total_slides = deck_md.count(SLIDES_SEPARATOR) + 1
+            cta_index = total_slides - (1 if ref_md else 0)  # CTA precedes References
+            closing = {
+                "screenshot_index": cta_index,
+                "narration": (
+                    "That wraps up the walkthrough. The code, demos, and "
+                    "documentation are all linked on screen — grab them from the "
+                    "project's repository."
+                ),
+            }
+            with open(os.path.join(presentation_folder, "closing.json"), "w") as f:
+                json.dump(closing, f, indent=2)
 
         # using mdslides to render presentation
         print("\n> Rendering presentation...\n")
