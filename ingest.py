@@ -201,6 +201,38 @@ def extract_reference_urls(docs, limit: int = 8) -> List[str]:
     return out
 
 
+_SOURCES_HEADING_RE = re.compile(
+    r"^#{1,6}\s*(?:\d+[.)]\s*)?(?:sources(?:\s+consulted)?|references|bibliography|works\s+cited|citations)\b",
+    re.IGNORECASE,
+)
+_BULLET_RE = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+(.*\S)")
+
+
+def extract_source_citations(docs, limit: int = 12) -> List[str]:
+    """Collect the bulleted entries under a document's own "Sources" /
+    "References" heading (the list a research write-up ends with), trimmed to a
+    slide-friendly "Publisher — Title" form. Empty when there is no such section."""
+    out: List[str] = []
+    for d in docs:
+        in_section = False
+        for line in (getattr(d, "text", "") or "").splitlines():
+            if line.lstrip().startswith("#"):
+                in_section = bool(_SOURCES_HEADING_RE.match(line.strip()))
+                continue
+            if not in_section:
+                continue
+            m = _BULLET_RE.match(line)
+            if not m:
+                continue
+            entry = re.sub(r"\s*\([^)]*\)", "", m.group(1))  # drop (notes)
+            entry = re.sub(r"[*_`]", "", entry).strip(" -—")
+            if entry and entry not in out:
+                out.append(entry)
+                if len(out) >= limit:
+                    return out
+    return out
+
+
 _MD_IMG_RE = re.compile(r"!\[([^\]]*)\]\(\s*<?([^)\s>]+)>?[^)]*\)")
 _HTML_SRC_RE = re.compile(
     r"""<(?:img|source|video)\b[^>]*\bsrc=["']([^"']+)["']""", re.IGNORECASE

@@ -1,3 +1,4 @@
+import html
 import os
 import re
 
@@ -114,6 +115,20 @@ def references_slide(source, urls) -> str:
     if len(lines) <= 2:  # nothing to cite
         return ""
     return SLIDES_SEPARATOR + "\n".join(lines) + "\n"
+
+
+def sources_slide(citations, urls=None) -> str:
+    """Closing 'Sources' slide for a research/document deck: the works the
+    source itself cites, then any URLs found in it. Rendered as a compact HTML
+    list (research write-ups often cite 10+ works, which overflow at the deck's
+    normal bullet size). Returns '' when empty."""
+    items = list(citations or []) + [u for u in (urls or []) if u not in (citations or [])]
+    if not items:
+        return ""
+    lis = "\n".join(f"<li>{html.escape(item)}</li>" for item in items)
+    size = "0.6em" if len(items) > 8 else "0.8em"
+    body = f'<ul style="font-size:{size}; line-height:1.35">\n{lis}\n</ul>'
+    return SLIDES_SEPARATOR + "### Sources\n\n" + body + "\n"
 
 
 def demo_slides(items) -> str:

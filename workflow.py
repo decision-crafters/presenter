@@ -28,6 +28,7 @@ from agents.structure_creater_from_data import create_presentation_structure_fro
 from ingest import (
     load_source_documents,
     extract_reference_urls,
+    extract_source_citations,
     extract_demo_media,
     fetch_repo_tape,
 )
@@ -41,6 +42,7 @@ from utils import (
     references_slide,
     demo_slides,
     cta_slide,
+    sources_slide,
 )
 
 
@@ -167,6 +169,7 @@ class PresenterWorkflow(Workflow):
         source = await ctx.store.get("source")
         documents = load_source_documents(source)
         await ctx.store.set("reference_urls", extract_reference_urls(documents))
+        await ctx.store.set("source_citations", extract_source_citations(documents))
         await ctx.store.set("demo_media", extract_demo_media(documents, source))
         structure_with_title = create_presentation_structure_from_data(
             documents, self.llm, self.target_slides, self.guide
@@ -459,29 +462,44 @@ class PresenterWorkflow(Workflow):
         if self.split_diagrams:
             deck_md = split_oversized_diagrams(deck_md, media_dir)
         demo_md = demo_slides(demo_items)
-        cta_md = cta_slide(source, [d["url"] for d in demo_items])
-        ref_md = references_slide(source, await ctx.store.get("reference_urls"))
+        reference_urls = await ctx.store.get("reference_urls", default=[])
+        # A single research document (Markdown/PDF file) has no code to "get":
+        # close on the works it cites instead of a repo CTA + References slide.
+        is_document = bool(source) and os.path.isfile(source)
+        if is_document:
+            citations = await ctx.store.get("source_citations", default=[])
+            cta_md = sources_slide(citations, reference_urls)
+            ref_md = ""
+        else:
+            cta_md = cta_slide(source, [d["url"] for d in demo_items])
+            ref_md = references_slide(source, reference_urls)
         deck_md += demo_md + cta_md + ref_md
         with open(presentation_file, "w") as f:
             f.write(deck_md)
 
-        # The CTA slide is appended (not a narrated structure slide), so the video
-        # wouldn't include it. Record its screenshot index + an outro so the video
-        # workflow can append a closing clip — every recording ends on the links.
+        # The closing slide is appended (not a narrated structure slide), so the
+        # video wouldn't include it. Record its screenshot index + an outro so the
+        # video workflow can append a closing clip — every recording ends on it.
+        closing_file = os.path.join(presentation_folder, "closing.json")
         if cta_md:
             from utils import SLIDES_SEPARATOR
             total_slides = deck_md.count(SLIDES_SEPARATOR) + 1
             cta_index = total_slides - (1 if ref_md else 0)  # CTA precedes References
-            closing = {
-                "screenshot_index": cta_index,
-                "narration": (
-                    "That wraps up the walkthrough. The code, demos, and "
-                    "documentation are all linked on screen — grab them from the "
-                    "project's repository."
-                ),
-            }
-            with open(os.path.join(presentation_folder, "closing.json"), "w") as f:
-                json.dump(closing, f, indent=2)
+            narration = (
+                "Those are the sources behind this research, all listed on "
+                "screen. Dig into them, test the claims against your own work, "
+                "and draw your own conclusions."
+                if is_document
+                else "That wraps up the walkthrough. The code, demos, and "
+                "documentation are all linked on screen — grab them from the "
+                "project's repository."
+            )
+            with open(closing_file, "w") as f:
+                json.dump(
+                    {"screenshot_index": cta_index, "narration": narration}, f, indent=2
+                )
+        elif os.path.exists(closing_file):
+            os.remove(closing_file)
 
         # using mdslides to render presentation
         print("\n> Rendering presentation...\n")
