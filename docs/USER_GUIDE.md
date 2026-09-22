@@ -1,6 +1,6 @@
 # Presenter User Guide
 
-**Version**: 0.2.0
+**Version**: 0.3.0
 **Last Updated**: 2026-09-21
 **Maintainers**: Presenter project
 
@@ -40,6 +40,7 @@ This guide covers:
 - ✅ Installation and setup.
 - ✅ The three ways to build a deck.
 - ✅ Provider selection, length, steering, branding, images, and video.
+- ✅ Personas, technical-term pronunciation, and demo embedding.
 - ✅ Finding and opening the output.
 - ❌ Internal architecture and design decisions. Those live in `DESIGN_DOC.md`.
 
@@ -57,7 +58,7 @@ Before you begin, confirm each item:
   - An **Ollama Cloud** API key.
   - An **OpenAI** API key.
 - [ ] **Command line tools on PATH**: `mmdc`, `mdslides`, `decktape`, `ffmpeg`, `ffprobe`, `repomix`, `git`.
-- [ ] **`espeak-ng`** if you plan to export a video. Kokoro uses it for narration.
+- [ ] **`espeak-ng`** is optional. Kokoro narrates English without it. Install it only for better pronunciation of rare, out-of-dictionary words.
 
 ### First-time setup
 
@@ -215,6 +216,115 @@ Presenter can render an MP4 with narration for every slide.
 
 **✅ Verification**: `presentations/<slug>/presentation.mp4` exists.
 
+### Choose a persona
+
+#### Overview
+
+A persona is a reusable bundle of a narrator voice, a tone and style, and a
+pronunciation lexicon for technical terms. A persona keeps the narration
+consistent and makes the audio say hard words correctly. Five personas ship with
+Presenter: Cloud Architect, DevOps Engineer, AI Engineer, Researcher, and
+Technical Educator.
+
+#### How to use
+
+1. Run `python run.py "kubernetes operators" --persona personas/devops-engineer --export-video`.
+2. To let Presenter pick the best fit, run `python run.py --source https://github.com/owner/repo --persona auto --export-video`.
+
+**✅ Verification**: the run prints a line that starts with `> Using persona`.
+
+💡 **Tip**: An explicit `--voice` or `--lang` flag overrides the persona, and the
+persona overrides the built-in default. To add your own persona, follow
+`personas/README.md`.
+
+### Pronounce technical terms correctly
+
+#### Overview
+
+Presenter rewrites technical terms to a spoken form at narration time only. The
+audio says "koob control" for `kubectl`, "yammel" for `yaml`, and "Jupiter" for
+`Jupyter`. The slide text and the speaker notes keep the real spelling. About 30
+common terms are always corrected. A persona adds terms for its field and can
+override the built-in forms.
+
+#### How to use
+
+1. Run any `--export-video` command. The built-in terms apply with no flag.
+2. Add `--persona personas/ai-engineer` to apply a domain lexicon.
+
+💡 **Tip**: To fix a term Presenter still gets wrong, add it to a persona under
+`pronunciations`. See `personas/README.md`.
+
+### Match the narrator voice to a gender
+
+#### Overview
+
+A persona declares a gender, and each Kokoro voice carries a gender. When a
+persona sets a voice that does not match its gender, Presenter switches to a
+matching default voice and prints a note. The narrator never speaks in the wrong
+gender.
+
+#### How to use
+
+1. Set `gender` and `voice` in a `PERSONA.md`.
+2. Run the deck.
+
+**✅ Verification**: the console prints an auto-correct note only when the voice and
+gender disagree.
+
+### Auto-select a persona and report a gap
+
+#### Overview
+
+The `--persona auto` option matches the content to the closest persona. When no
+persona fits, Presenter can open a GitHub issue that requests a new persona for
+the detected domain.
+
+#### How to use
+
+1. Run `python run.py --source https://github.com/owner/repo --persona auto`.
+2. To file a gap issue, add `--suggest-persona-issue`.
+3. To choose the target repository, add `--persona-issue-repo owner/name`.
+
+⚠️ **Warning**: Filing an issue is opt-in. In an interactive terminal, Presenter
+asks for confirmation first.
+
+### Show a demo recording from a source repo
+
+#### Overview
+
+When a source repository embeds a demo recording in its README, Presenter uses
+it. Presenter downloads the recording, adds a Demo slide, and, for a video,
+splices the demo in as an animated clip with a spoken walkthrough. The
+walkthrough follows the repository's VHS tape commands when Presenter can fetch
+them, and it runs for the length of the demo. Supported formats are GIF, MP4,
+and WebM.
+
+#### How to use
+
+1. Run `python run.py --source https://github.com/owner/repo --export-video`.
+2. Open the deck or the video to see the demo.
+
+**✅ Verification**: a `demos.json` file appears in the deck folder, and the `media`
+folder holds the downloaded recording.
+
+💡 **Tip**: The demo animates in the HTML deck and in the video. The PDF shows one
+still frame.
+
+### Cite the source and close with a call to action
+
+#### Overview
+
+For a source based deck, Presenter adds a small footer with the repository on
+every slide. Presenter ends the deck with a "Get the Code" slide that lists the
+repository and the demo links. The exported video ends on that same closing
+slide.
+
+#### How to use
+
+1. Run `python run.py --source https://github.com/owner/repo --export-video`.
+2. Open the last slide of the deck, or the end of the video, to see the links.
+
 ### Find and open the output
 
 #### Overview
@@ -272,10 +382,11 @@ Every run writes to a folder named after the deck under `presentations/`.
 #### Issue: The video export fails
 
 **Symptoms**: Narration does not render.
-**Cause**: `espeak-ng` is missing.
+**Cause**: A required tool is missing from PATH, or the virtual environment is not active, so `mdslides`, `ffmpeg`, or Kokoro cannot run.
 **Solution**:
-1. Install `espeak-ng`.
-2. Run the command with `--export-video` again.
+1. Activate the virtual environment so `mdslides` and Kokoro are on PATH.
+2. Confirm `ffmpeg` and `ffprobe` are installed.
+3. Run the command with `--export-video` again.
 
 ### Error messages
 
@@ -299,7 +410,7 @@ Every run writes to a folder named after the deck under `presentations/`.
 **Recommended**:
 
 - A capable structured-output model, for example `qwen2.5:7b` or a strong cloud model.
-- `espeak-ng` for video export.
+- `espeak-ng` is optional. It improves pronunciation of rare, out-of-dictionary words only.
 
 ---
 
@@ -354,8 +465,11 @@ ran and the full output.
 | `--guide` | A `SKILL.md` or `AGENT.md` guide file that steers content. | auto-discover |
 | `--design` | A `DESIGN.md` file that brands the deck. | auto-discover |
 | `--images` | Add inline photos: `pollinations`, `pexels`, or `picsum`. | off |
-| `--voice` | The Kokoro narration voice. | `af_heart` |
-| `--lang` | The Kokoro language code. | `a` |
+| `--voice` | The Kokoro narration voice. | persona voice, then `af_heart` |
+| `--lang` | The Kokoro language code. | persona lang, then `a` |
+| `--persona` | A `PERSONA.md` file or directory, or `auto` to pick the best fit. Sets the voice, tone, and pronunciation. | none |
+| `--suggest-persona-issue` | With `--persona auto`, offer to file a GitHub issue when no persona fits. | off |
+| `--persona-issue-repo` | The target repository for a persona gap issue. | current repo |
 | `--export-video` | Export a narrated MP4. | off |
 
 ### Glossary
@@ -369,6 +483,10 @@ ran and the full output.
 - **repomix**: A tool that packs a repository into one text file for ingestion.
 - **DESIGN.md**: A brand and voice file for a deck.
 - **Guide**: A `SKILL.md` or `AGENT.md` file that focuses the content.
+- **Persona**: A `PERSONA.md` bundle of a narrator voice, a tone and style, and a pronunciation lexicon.
+- **Pronunciation lexicon**: A map from a technical term to its spoken form, applied to the narration audio only.
+- **VHS tape**: A `.tape` script that records a terminal demo. Presenter reads its commands to narrate the demo.
+- **Get the Code**: The closing call-to-action slide that lists the repository and demo links.
 - **PRESENTER_RESULT**: The final machine-readable line that lists the output paths.
 
 ### Version history
@@ -376,3 +494,4 @@ ran and the full output.
 | Version | Date | Changes |
 |---------|------|---------|
 | 0.2.0 | 2026-09-21 | First user guide. |
+| 0.3.0 | 2026-09-21 | Added personas, technical-term pronunciation, voice and gender matching, persona auto-select with a gap issue, demo embedding with a narrated walkthrough, a source footer, and a closing call-to-action. |

@@ -1,7 +1,7 @@
 # Presenter Software Design Document
 
 **System:** Presenter
-**Version:** 0.2.0
+**Version:** 0.3.0
 **Status:** Accepted
 **Audience:** Architects, implementers, reviewers
 **Voice:** STE100
@@ -105,20 +105,22 @@ The design rests on a small set of choices. Each is recorded as an ADR in sectio
 
 | Building block | Responsibility | Requirements |
 |----------------|----------------|--------------|
-| `run.py` | Parse the CLI, build the provider, load guide and design, run the workflows. | FR-1, FR-2, FR-4, FR-5, FR-6, FR-7 |
+| `run.py` | Parse the CLI, build the provider, load guide, design, and persona, resolve voice and pronunciation precedence, select the image provider, run the workflows. | FR-1, FR-2, FR-4, FR-5, FR-6, FR-7, FR-11, FR-12, FR-15 |
 | `providers.py` | `build_llm` returns an `LLM` for ollama, ollama-cloud, or openai. | FR-7 |
-| `ingest.py` | `load_source_documents` packs a repo or reads local files, caps and prioritizes text, rejects thin sources, and extracts reference URLs. | FR-2, FR-9, FR-10 |
+| `ingest.py` | `load_source_documents` packs a repo or reads local files, caps and prioritizes text, rejects thin sources, extracts reference URLs, detects demo media (`extract_demo_media`), and fetches a repo VHS tape (`fetch_repo_tape`). | FR-2, FR-9, FR-10, FR-13 |
 | `guide.py` | Load a SKILL.md or AGENT.md guide and format it as a steering block. | FR-5 |
-| `design.py` | Parse a DESIGN.md, emit reveal config and brand CSS, and inject branding into the deck. | FR-6 |
-| `workflow.py` (`PresenterWorkflow`) | Orchestrate structure, validation, slide fan out, render, split, and citation. | FR-1, FR-2, FR-3, FR-8, FR-10 |
+| `design.py` | Parse a DESIGN.md, emit reveal config and brand CSS, inject branding, the diagram fit caps, and the source footer into the deck. | FR-6, FR-14 |
+| `persona.py` | `load_persona` reads a PERSONA.md, merges built-in pronunciations, and matches the voice to the declared gender. `select_persona` picks the best fit for `--persona auto`. `open_persona_gap_issue` files a gap issue. | FR-11, FR-12 |
+| `workflow.py` (`PresenterWorkflow`) | Orchestrate structure, validation, slide fan out, render, split, citation, inline image fetch, demo download, walkthrough generation, and the closing CTA record. | FR-1, FR-2, FR-3, FR-8, FR-10, FR-13, FR-14, FR-15 |
 | `agents/structure_creater*.py` | Generate the slide structure from a topic or from source text. | FR-1, FR-2 |
 | `agents/structure_validator.py`, `structure_updater.py` | Critique and refine the structure. | FR-1 |
 | `agents/slide_maker.py` | Compose one slide and its narration. | FR-1 |
-| `agents/narrator.py` | Synthesize narration audio with Kokoro. | FR-4 |
-| `agents/video_creator.py` (`PresenterVideoCreaterWorkflow`) | Build per slide clips and concatenate the MP4. | FR-4 |
+| `agents/narrator.py` | Synthesize narration audio with Kokoro, and apply the pronunciation lexicon to the TTS input (`apply_pronunciations`). | FR-4, FR-12 |
+| `agents/demo_narrator.py` | `write_demo_walkthrough` writes a spoken walkthrough for a demo, sized to its runtime and grounded in the VHS tape commands. | FR-13 |
+| `agents/video_creator.py` (`PresenterVideoCreaterWorkflow`) | Build per slide clips, animated demo clips, and a closing CTA clip, then concatenate the MP4. | FR-4, FR-13, FR-14 |
 | `models.py` | Pydantic types for structured output. | FR-1 |
-| `utils.py` | Markdown sanitizing, diagram splitting, references slide, config. | FR-3, FR-10 |
-| `images.py` | Fetch an optional inline photo per slide (Pollinations, Pexels, or Picsum), with a Picsum fallback. | FR-11 |
+| `utils.py` | Markdown sanitizing, diagram splitting, references slide, demo slides, CTA slide, config. | FR-3, FR-10, FR-13, FR-14 |
+| `images.py` | Fetch an optional inline photo per slide (Pollinations, Pexels, or Picsum), with a Picsum fallback. | FR-15 |
 
 ```mermaid
 flowchart TB
@@ -149,19 +151,22 @@ workflow.py            # PresenterWorkflow: structure -> slides -> render
 providers.py           # build_llm factory (ollama, ollama-cloud, openai)
 ingest.py              # repomix + local ingestion, caps, gate, URL extraction
 guide.py               # content steering (SKILL.md / AGENT.md)
-design.py              # DESIGN.md branding + voice, HTML injection
+design.py              # DESIGN.md branding + voice, footer, diagram-fit CSS
+persona.py             # persona load/select, built-in pronunciations, gap issue
 models.py              # Pydantic structured-output types
-utils.py               # sanitize, diagram split, references slide, config
+utils.py               # sanitize, diagram split, references/demo/CTA slides, config
 agents/
   structure_creater.py            # topic -> structure
   structure_creater_from_data.py  # source text -> structure
   structure_validator.py          # critique structure
   structure_updater.py            # apply feedback
   slide_maker.py                  # one slide + narration
-  narrator.py                     # Kokoro TTS
+  narrator.py                     # Kokoro TTS + pronunciation lexicon
+  demo_narrator.py                # demo walkthrough script
   video_creator.py                # PresenterVideoCreaterWorkflow
 designs/                # example DESIGN.md themes (midnight, sunrise)
 guides/                 # example steering skill (token-focus)
+personas/               # persona library + README schema and index
 requirements.txt
 .env.example
 ```
@@ -221,6 +226,42 @@ stateDiagram-v2
   Video --> [*]
 ```
 
+### 6.4 Persona, demos, and the closing clip
+
+`run.py` resolves the persona before the workflows start. An explicit `--voice`
+or `--lang` flag wins, then the persona value, then the built-in default. The
+persona steering joins the guide body and the DESIGN.md voice into one steering
+block. The persona voice, language, and pronunciation lexicon flow into
+`PresenterVideoCreaterWorkflow`.
+
+During `combine_slides`, Presenter downloads any demo recording found in the
+source, writes `demos.json` with a runtime-sized walkthrough per demo, and writes
+`closing.json` with the CTA slide screenshot index and an outro. The video
+workflow narrates each slide, applies the pronunciation lexicon, builds an
+animated clip per demo, builds a closing CTA clip, and concatenates the demos and
+the closing clip after the narrated slides.
+
+```mermaid
+sequenceDiagram
+  participant U as User
+  participant R as run.py
+  participant P as persona
+  participant W as PresenterWorkflow
+  participant D as demo pipeline
+  participant V as PresenterVideoCreaterWorkflow
+  U->>R: run.py --source URL --persona auto --export-video
+  R->>P: select_persona(summary)
+  P-->>R: persona (voice, gender, lexicon) or none
+  R->>W: run with steering + design
+  W->>D: extract_demo_media + fetch_repo_tape
+  D-->>W: demos.json (walkthroughs) + closing.json
+  W-->>R: deck folder (HTML + PDF)
+  R->>V: voice, lang, pronunciations
+  V->>V: narrate slides (apply_pronunciations)
+  V->>V: build demo clips + closing CTA clip
+  V-->>U: presentation.mp4
+```
+
 ---
 
 ## 7. Deployment view
@@ -244,10 +285,12 @@ Runtime: one local Python process. No server and no database. Configuration come
 ## 8. Crosscutting concepts
 
 - Configuration: three layers. CLI flags, then `.env` variables (`LLM_PROVIDER`, `LLM_MODEL`, `OLLAMA_BASE_URL`, `OLLAMA_CLOUD_API_KEY`, `OPENAI_API_KEY`), then built in defaults in `providers.py`.
-- Content steering: `guide.py` injects a guide body, and `design.py` adds the DESIGN.md voice, into one steering block passed to every generation prompt.
+- Content steering: `guide.py` injects a guide body, `design.py` adds the DESIGN.md voice, and `persona.py` adds the persona tone, into one steering block passed to every generation prompt.
+- Personas and pronunciation: a persona bundles a Kokoro voice, a tone, and a pronunciation lexicon. `agents/narrator.apply_pronunciations` rewrites technical terms to a spoken form on the TTS input only, so the audio is correct while `narration.txt` keeps the real spelling. Matching is case-insensitive, anchored on word boundaries, and longest key first. `persona.py` merges about 30 built-in terms under the persona terms, and it matches the voice to the declared gender.
+- Video audio: `NARRATION_TEMPO` sets a natural narration pace, and every clip encodes stereo 48 kHz audio, so the concatenated MP4 has a uniform audio track.
 - Error handling: the per slide compose step and the narrate step use a `ConstantDelayRetryPolicy`, which absorbs transient model or audio failures.
-- Extensibility: providers, guides, and designs are the extension points. A new backend is a branch in `build_llm`. A new brand or focus is a new file.
-- Rendering fixes: `utils.sanitize_markdown` corrects Mermaid and heading issues before render. `utils.split_oversized_diagrams` moves a tall diagram onto its own slide. `design.apply_branding` injects a diagram fit cap and brand CSS.
+- Extensibility: providers, guides, designs, and personas are the extension points. A new backend is a branch in `build_llm`. A new brand, focus, or persona is a new file.
+- Rendering fixes: `utils.sanitize_markdown` corrects Mermaid and heading issues before render, including a rewrite of an `HH:MM` value inside a Mermaid timeline. `utils.split_oversized_diagrams` moves a tall diagram onto its own slide. `combine_slides` falls back to the un-rendered template when `mmdc` fails, so one bad diagram does not lose the run. `design.apply_branding` injects the diagram fit caps, the source footer, and brand CSS.
 - Security: `repomix` runs a secret scan before repository text reaches the model. `.env` is git ignored. A personal `DESIGN.md` at the project root is git ignored.
 
 ---
@@ -302,6 +345,22 @@ Runtime: one local Python process. No server and no database. Configuration come
 **Consequences:** Faster runs and predictable cost. Very large sources are truncated by design.
 **Alternatives:** SummaryIndex tree summarize, removed for latency.
 
+### ADR-007: Persona bundle and deterministic pronunciation
+
+**Status:** Accepted
+**Context:** A general text to speech model mispronounces technical terms, and a hand maintained pronunciation file does not scale. Voice, tone, and pronunciation belonged in one reusable place.
+**Decision:** A `PERSONA.md` bundles a Kokoro voice, a tone body, and a pronunciation lexicon. `agents/narrator.apply_pronunciations` rewrites terms on the TTS input only, right before Kokoro, so the slide text is untouched. `persona.py` ships built-in terms, merges the persona terms on top, and matches the voice to the declared gender.
+**Consequences:** Correct audio without editing slide content. The lexicon covers common terms and the persona field terms. A term Presenter still misses is one line in a persona.
+**Alternatives:** Prompt the model to respell terms, rejected as unreliable on small local models.
+
+### ADR-008: Demo embedding and the closing clip
+
+**Status:** Accepted
+**Context:** A source repository often ships a terminal demo, and a recorded video ended on the last content slide without the links.
+**Decision:** Detect a demo recording embedded in the source README, download it, and show it on a Demo slide. For a video, generate a walkthrough sized to the demo runtime and grounded in the repo VHS tape, and splice the demo in as an animated clip. Record the CTA slide screenshot index in `closing.json`, then append a closing CTA clip as the final segment.
+**Consequences:** The video shows and narrates the demo, and every recording ends on the links. A GitHub source has no file list, so demo detection relies on the README embed, and the tape fetch relies on `gh`.
+**Alternatives:** Run the VHS tape at build time, rejected for the heavy toolchain and environment it requires.
+
 ---
 
 ## 10. Quality requirements
@@ -316,7 +375,7 @@ Runtime: one local Python process. No server and no database. Configuration come
 
 ### Functional requirements
 
-- FR-1 topic to deck. FR-2 source to deck. FR-3 HTML and PDF output. FR-4 narrated MP4. FR-5 content steering. FR-6 branding. FR-7 provider selection. FR-8 resumable runs. FR-9 reject thin sources. FR-10 cite sources. FR-11 optional inline slide images.
+- FR-1 topic to deck. FR-2 source to deck. FR-3 HTML and PDF output. FR-4 narrated MP4. FR-5 content steering. FR-6 branding. FR-7 provider selection. FR-8 resumable runs. FR-9 reject thin sources. FR-10 cite sources. FR-11 persona selection and steering. FR-12 technical-term pronunciation. FR-13 demo embedding with a narrated walkthrough. FR-14 source footer and closing call-to-action. FR-15 optional inline slide images.
 
 ---
 
@@ -327,6 +386,10 @@ Runtime: one local Python process. No server and no database. Configuration come
 - The Python 3.11 pin is driven by `kokoro`. A future Kokoro release may lift it.
 - `sanitize_markdown` carries render specific fixes for Mermaid. These are brittle and tied to the current renderer versions.
 - Branding injection depends on stable anchors (`</head>`, `<div class="reveal">`) in the `mdslides` output.
+- The pronunciation lexicon covers common terms and the persona field terms. A term outside the lexicon can still be mispronounced. Mitigation: add the term to a persona.
+- The demo walkthrough length is an estimate. Kokoro speaking rate varies, so the narration can run a little longer or shorter than the demo. Mitigation: the clip length is the longer of the demo and the narration, and the demo loops to fill.
+- Demo detection reads the source README embed, and the tape fetch relies on `gh`. A repository that ships a tape but embeds no recording is not detected on the GitHub path.
+- The closing clip uses the CTA slide screenshot index recorded during the deck build. A change to the slide append order would move that index.
 - The optional image feature depends on a third-party network service. Pollinations has no SLA, is slow (about 20 to 40 seconds per image), and returns occasional errors. Mitigation: the feature is opt-in, fetches are sequential and capped, results are cached, and Picsum is the fallback.
 
 ---
@@ -349,6 +412,11 @@ Runtime: one local Python process. No server and no database. Configuration come
 | reveal.js | The HTML presentation framework used for the deck. |
 | DESIGN.md | A brand and voice file, distinct from this DESIGN_DOC.md. |
 | guide | A SKILL.md or AGENT.md file that steers deck content. |
+| persona | A PERSONA.md bundle of a narrator voice, a tone, and a pronunciation lexicon. |
+| pronunciation lexicon | A map from a technical term to its spoken form, applied to the narration audio only. |
+| VHS tape | A `.tape` script that records a terminal demo. Presenter reads its commands to narrate the demo. |
+| demos.json | A per deck manifest of downloaded demos, each with a runtime-sized walkthrough. |
+| closing.json | A record of the CTA slide screenshot index and the outro, used to append the closing clip. |
 | STE100 | The controlled English voice pack used for this document. |
 
 ### UI wireframe: rendered slide

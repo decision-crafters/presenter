@@ -15,6 +15,7 @@ single-letter language code (``a`` = American English). The old ElevenLabs
 """
 
 import os
+import re
 import subprocess
 import tempfile
 
@@ -22,6 +23,29 @@ import numpy as np
 import soundfile as sf
 
 SAMPLE_RATE = 24000
+
+
+def apply_pronunciations(text: str, lexicon: dict) -> str:
+    """Rewrite hard-to-say technical tokens to a spoken form before TTS.
+
+    Kokoro phonemizes English literally, so ``kubectl``/``yaml`` come out wrong.
+    A persona's pronunciation lexicon maps a term to how it should *sound*
+    (``kubectl`` -> ``koob control``); we substitute here, on the TTS input only,
+    so the on-screen speaker notes keep the correct spelling. Matching is
+    case-insensitive and anchored on non-word boundaries (longest key first) so a
+    term isn't matched inside a larger word.
+    """
+    if not text or not lexicon:
+        return text
+    keys = sorted((k for k in lexicon if k), key=len, reverse=True)
+    if not keys:
+        return text
+    pattern = re.compile(
+        r"(?<!\w)(" + "|".join(re.escape(k) for k in keys) + r")(?!\w)",
+        re.IGNORECASE,
+    )
+    lower = {k.lower(): v for k, v in lexicon.items()}
+    return pattern.sub(lambda m: lower[m.group(1).lower()], text)
 
 # Lazily-initialized singleton pipeline, keyed by language code, so the model is
 # loaded once per process rather than per slide.
@@ -41,8 +65,14 @@ async def narrate(
     voice: str,
     output_file: str,
     lang_code: str = "a",
+    pronunciations: dict = None,
 ):
     pipeline = _get_pipeline(lang_code)
+
+    # Fix technical-term pronunciation on the TTS input only (never the saved
+    # narration.txt), so the spoken audio is right while the notes stay readable.
+    if pronunciations:
+        text = apply_pronunciations(text, pronunciations)
 
     # Kokoro yields audio in chunks (one per sentence-ish segment); concatenate
     # them into a single clip before encoding.

@@ -123,7 +123,14 @@ python run.py "the history of coffee" --images pexels         # real photos, nee
 
 - Presentations are only as good as their source: when a `--source` repo/folder has too little documentation, the run is rejected with a clear message rather than producing a weak deck (add a README/docs and retry).
 
-- Add `--export-video` argument to generate a full video of the presentation with voiceover (pick a Kokoro voice with `--voice`).
+- Pick a **persona** with `--persona` — a reusable bundle of a narrator voice, tone/style steering, and a **technical-term pronunciation lexicon** so the narration says `kubectl` as "koob control" and `yaml` as "yammel" (the slide text stays unchanged). Ready-made technical personas ship in `personas/` (Cloud Architect, DevOps Engineer, AI Engineer, Researcher, Technical Educator). `--persona auto` picks the best fit for your content; with `--suggest-persona-issue` it offers to file a "new persona needed" GitHub issue when nothing fits. Common terms are pronounced better even without a persona. See [`personas/README.md`](personas/README.md) for the format and how to add your own.
+
+```bash
+python run.py "kubernetes operators" --persona personas/devops-engineer --export-video
+python run.py --source <repo> --persona auto --export-video
+```
+
+- Add `--export-video` argument to generate a full video of the presentation with voiceover (pick a Kokoro voice with `--voice`, or let a `--persona` set it).
 
 ```bash
 python run.py "observer design pattern" --export-video

@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 from providers import build_llm
 from guide import load_guide
 from design import load_design
+from persona import load_persona, select_persona, open_persona_gap_issue
 from images import resolve_image_provider
 from workflow import PresenterWorkflow
 from agents.video_creator import PresenterVideoCreaterWorkflow
@@ -32,6 +33,21 @@ Shape the result: --guide (focus the angle), --design (branding/theme),
 
 Output lands in presentations/<slug>/: output/index.html and presentation.pdf.
 """
+
+
+def _maybe_file_gap_issue(domain: str, repo) -> None:
+    """File a persona-gap GitHub issue. The --suggest-persona-issue flag is the
+    opt-in; when running interactively, confirm first (outward action)."""
+    import sys
+
+    if sys.stdin.isatty():
+        ans = input(
+            f"File a GitHub issue to add a '{domain}' persona? [y/N] "
+        ).strip().lower()
+        if ans not in ("y", "yes"):
+            print("\n> Skipped filing persona-gap issue.\n")
+            return
+    open_persona_gap_issue(domain, terms=[], repo=repo)
 
 
 async def main():
@@ -106,14 +122,38 @@ async def main():
     parser.add_argument(
         "--voice",
         type=str,
-        default="af_heart",
-        help="Kokoro TTS voice name for narration",
+        default=None,
+        help="Kokoro TTS voice name for narration (overrides the persona's voice)",
     )
     parser.add_argument(
         "--lang",
         type=str,
-        default="a",
-        help="Kokoro language code (a = American English)",
+        default=None,
+        help="Kokoro language code (a = American English; overrides the persona)",
+    )
+    parser.add_argument(
+        "--persona",
+        type=str,
+        default=None,
+        help=(
+            "Path to a PERSONA.md (or persona dir) bundling a TTS voice, tone, "
+            "and a technical-term pronunciation lexicon. Pass 'auto' to pick the "
+            "best-fit persona from personas/ by content."
+        ),
+    )
+    parser.add_argument(
+        "--suggest-persona-issue",
+        action="store_true",
+        help=(
+            "When --persona auto finds no fitting persona, offer to file a "
+            "'new persona needed' GitHub issue (via gh) for the detected domain."
+        ),
+    )
+    parser.add_argument(
+        "--persona-issue-repo",
+        type=str,
+        default=None,
+        help="Target repo (owner/name) for --suggest-persona-issue; default: current repo.",
     )
     parser.add_argument(
         "--export-video",
@@ -128,9 +168,34 @@ async def main():
         sys.exit(1)
 
     llm = build_llm(args.provider, args.model)
-    design = load_design(args.design)
-    # DESIGN.md's voice merges with the --guide body into one steering block.
-    steering = "\n\n".join(x for x in [load_guide(args.guide), design.voice] if x)
+
+    # Resolve the persona: an explicit PERSONA.md, an auto-picked best fit, or
+    # none (which still carries the common-term pronunciation built-ins).
+    if args.persona and args.persona.lower() == "auto":
+        persona, reason = select_persona(args.topic or args.source or "", llm)
+        if persona:
+            print(f"\n> Auto-selected persona: {persona.name}\n")
+        else:
+            print(
+                f"\n> No persona fits this content (domain: {reason}); "
+                "using built-in pronunciations only.\n"
+            )
+            if args.suggest_persona_issue:
+                _maybe_file_gap_issue(reason, args.persona_issue_repo)
+            persona = load_persona(None)
+    elif args.persona:
+        persona = load_persona(args.persona)
+    else:
+        persona = load_persona(None)
+
+    # --design > persona's design; --voice/--lang > persona > built-in default.
+    design = load_design(args.design or persona.design_ref)
+    voice = args.voice or persona.voice or "af_heart"
+    lang = args.lang or persona.lang or "a"
+    # Guide body + DESIGN.md voice + persona tone merge into one steering block.
+    steering = "\n\n".join(
+        x for x in [load_guide(args.guide), design.voice, persona.steering] if x
+    )
     workflow = PresenterWorkflow(
         llm=llm,
         target_slides=args.slides,
@@ -148,8 +213,9 @@ async def main():
     if args.export_video:
         print("\n> Exporting video of the presentation with voiceover...\n")
         video_creator_workflow = PresenterVideoCreaterWorkflow(
-            voice=args.voice,
-            lang_code=args.lang,
+            voice=voice,
+            lang_code=lang,
+            pronunciations=persona.pronunciations,
             verbose=False,
             timeout=WORKFLOW_TIMEOUT,
         )

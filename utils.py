@@ -36,11 +36,29 @@ def sanitize_markdown(text: str) -> str:
     pattern3 = r"!\[.+\]\(\./(.*?\.png)\)"
     result = re.sub(pattern3, r"![diagram](./media/\1)", result, flags=re.M)
     result = result.replace("flowchart TD", "flowchart LR")
+    result = _fix_timeline_periods(result)
     return result + "\n\n"
 
 
+def _fix_timeline_periods(text: str) -> str:
+    """Mermaid ``timeline`` uses ``<period> : <event>`` syntax, so a colon inside
+    the period token breaks the parser. Models love to use ``HH:MM`` timestamps as
+    periods (e.g. ``14:31 : Snapshot saved``), whose colon collides with the
+    separator and aborts ``mmdc`` for the whole deck. Rewrite ``HH:MM`` -> ``HH.MM``
+    inside timeline blocks only, leaving the ``:`` event separators untouched."""
+
+    def _fix_block(m: "re.Match") -> str:
+        body = m.group(1)
+        if not re.match(r"\s*timeline\b", body):
+            return m.group(0)
+        body = re.sub(r"\b(\d{1,2}):(\d{2})\b", r"\1.\2", body)
+        return "```mermaid" + body + "```"
+
+    return re.sub(r"(?s)```mermaid(.*?)```", _fix_block, text)
+
+
 # Only Mermaid diagram PNGs are eligible for the own-slide split; fetched photos
-# (.jpg) stay inline with their slide text.
+# (.jpg) and demo GIFs stay with their own slide.
 _IMG_RE = re.compile(r"!\[[^\]]*\]\(\./media/([^)]+\.png)\)")
 _HEADING_RE = re.compile(r"^#{1,6}\s+.*$", re.MULTILINE)
 
@@ -95,4 +113,32 @@ def references_slide(source, urls) -> str:
         lines.append(f"- {url}")
     if len(lines) <= 2:  # nothing to cite
         return ""
+    return SLIDES_SEPARATOR + "\n".join(lines) + "\n"
+
+
+def demo_slides(items) -> str:
+    """One 'Demo' slide per detected recording. ``items`` is a list of
+    ``{"title", "file"}`` where ``file`` is a basename already copied into
+    ``media/``. GIFs animate in the HTML deck (static frame in the PDF). Empty
+    input yields '' so nothing is appended."""
+    out = []
+    for item in items or []:
+        title = (item.get("title") or "Demo").strip()
+        media_file = item.get("file")
+        if not media_file:
+            continue
+        out.append(f"### Demo — {title}\n\n![](./media/{media_file})")
+    if not out:
+        return ""
+    return SLIDES_SEPARATOR + SLIDES_SEPARATOR.join(out) + "\n"
+
+
+def cta_slide(source, demo_urls=None) -> str:
+    """A closing 'Get the Code' call-to-action citing the repo/source and any
+    demo links. Returns '' when there is no source to point at."""
+    if not source:
+        return ""
+    lines = ["### Get the Code", "", f"- Repo: {source}"]
+    for url in demo_urls or []:
+        lines.append(f"- Demo: {url}")
     return SLIDES_SEPARATOR + "\n".join(lines) + "\n"
