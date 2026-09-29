@@ -61,6 +61,8 @@ BUILTIN_PRONUNCIATIONS = {
     "repo": "repo",
     "async": "a sync",
     "middleware": "middle ware",
+    "todo": "to do",
+    "todos": "to dos",
 }
 
 

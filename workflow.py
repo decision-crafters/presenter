@@ -128,6 +128,15 @@ class SlideCreated(Event):
     image_query: Optional[str] = None
 
 
+def _venv_tool(name: str) -> str:
+    """A console script installed in this interpreter's environment (e.g. the
+    project .venv) even when that env isn't activated, else the bare name."""
+    import sys
+
+    candidate = os.path.join(os.path.dirname(sys.executable), name)
+    return candidate if os.path.exists(candidate) else name
+
+
 class PresenterWorkflow(Workflow):
     def __init__(
         self,
@@ -138,6 +147,9 @@ class PresenterWorkflow(Workflow):
         design: Optional[Design] = None,
         split_diagrams: bool = True,
         images_provider: Optional[str] = None,
+        presentation_folder: Optional[str] = None,
+        title: Optional[str] = None,
+        source_focus: Optional[List[str]] = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
@@ -147,6 +159,11 @@ class PresenterWorkflow(Workflow):
         self.design = design
         self.split_diagrams = split_diagrams
         self.images_provider = images_provider
+        # A series episode (series.py) pins its folder and title so reruns land
+        # in the same place instead of a folder named after an LLM-chosen title.
+        self.presentation_folder = presentation_folder
+        self.title = title
+        self.source_focus = source_focus
 
     @step
     async def start(self, ctx: Context, ev: StartEvent) -> TopicFound | SourceProvided:
@@ -167,17 +184,34 @@ class PresenterWorkflow(Workflow):
         self, ctx: Context, ev: SourceProvided
     ) -> StructureFinalized:
         source = await ctx.store.get("source")
-        documents = load_source_documents(source)
+        documents = load_source_documents(source, self.source_focus)
         await ctx.store.set("reference_urls", extract_reference_urls(documents))
         await ctx.store.set("source_citations", extract_source_citations(documents))
         await ctx.store.set("demo_media", extract_demo_media(documents, source))
+
+        # A pinned (series episode) folder with a cached structure resumes it.
+        if self.presentation_folder:
+            structure_file = os.path.join(self.presentation_folder, "structure.pkl")
+            if os.path.exists(structure_file):
+                print(
+                    f"\n> Presentation structure already exists in "
+                    f"{self.presentation_folder}. Using the existing structure.\n"
+                )
+                with open(structure_file, "rb") as f:
+                    structure = pickle.load(f)
+                await ctx.store.set("topic", self.title or "")
+                await ctx.store.set("presentation_folder", self.presentation_folder)
+                return StructureFinalized(structure=structure)
+
         structure_with_title = create_presentation_structure_from_data(
             documents, self.llm, self.target_slides, self.guide
         )
-        topic = structure_with_title.title
+        topic = self.title or structure_with_title.title
         await ctx.store.set("topic", topic)
 
-        presentation_folder = os.path.join("presentations", get_safe_foldername(topic))
+        presentation_folder = self.presentation_folder or os.path.join(
+            "presentations", get_safe_foldername(topic)
+        )
         await ctx.store.set("presentation_folder", presentation_folder)
         os.makedirs(presentation_folder, exist_ok=True)
 
@@ -508,7 +542,7 @@ class PresenterWorkflow(Workflow):
         pdf_file = os.path.join(presentation_folder, "presentation.pdf")
         mdslides_result = subprocess.run(
             [
-                "mdslides",
+                _venv_tool("mdslides"),
                 presentation_file,
                 "--include",
                 media_dir,

@@ -12,6 +12,7 @@ we prioritize the most descriptive files (root README, then specs/references) an
 cap the total that gets ingested.
 """
 
+import fnmatch
 import os
 import re
 import shutil
@@ -74,7 +75,7 @@ def _repomix_command() -> List[str]:
 _FILE_SECTION_RE = re.compile(r"^## File: (.+?)\s*$", re.MULTILINE)
 
 
-def _prioritize_packed(packed: str) -> str:
+def _prioritize_packed(packed: str, focus: Optional[List[str]] = None) -> str:
     """Reorder repomix's per-file sections so README/specs come first.
 
     repomix packs files in directory order; because we then cap total size, we
@@ -90,12 +91,12 @@ def _prioritize_packed(packed: str) -> str:
     for i, m in enumerate(matches):
         end = matches[i + 1].start() if i + 1 < len(matches) else len(packed)
         path = m.group(1).strip()
-        sections.append((_file_priority(path), i, packed[m.start() : end]))
+        sections.append((_file_priority(path, focus), i, packed[m.start() : end]))
     sections.sort(key=lambda s: (s[0], s[1]))  # priority, then original order
     return preamble + "".join(s[2] for s in sections)
 
 
-def _pack_repo(url: str) -> str:
+def _pack_repo(url: str, focus: Optional[List[str]] = None) -> str:
     """Pack a remote repo's docs into one Markdown blob via repomix.
 
     repomix handles the remote fetch, honors .gitignore, and runs a Secretlint
@@ -121,18 +122,32 @@ def _pack_repo(url: str) -> str:
             stderr=subprocess.PIPE,
         )
         with open(out_path, "r") as f:
-            return _prioritize_packed(f.read())
+            return _prioritize_packed(f.read(), focus)
     finally:
         if os.path.exists(out_path):
             os.remove(out_path)
 
 
-def _file_priority(rel_path: str) -> int:
-    """Lower sorts first: README, then specs/references, then docs/, then rest.
+def _matches_focus(rel_path: str, focus: Optional[List[str]]) -> bool:
+    """True if a path matches a focus glob (``docs/workflows/*.md``) or prefix."""
+    rel = rel_path.replace(os.sep, "/").lstrip("./")
+    for pat in focus or []:
+        pat = pat.strip().lstrip("./")
+        if pat and (fnmatch.fnmatch(rel, pat) or rel.startswith(pat.rstrip("/") + "/") or rel == pat):
+            return True
+    return False
+
+
+def _file_priority(rel_path: str, focus: Optional[List[str]] = None) -> int:
+    """Lower sorts first: focus files, README, specs/references, docs/, rest.
 
     Many repos keep their real conceptual signal in ``*.spec.md`` files and in
     ``references/``/``schemas/`` folders, while ``docs/`` holds peripheral notes.
+    ``focus`` (a series episode's own files) outranks everything, so the files
+    an episode is about survive the size cap.
     """
+    if _matches_focus(rel_path, focus):
+        return -1
     lowered = rel_path.lower()
     base = os.path.basename(lowered)
     is_root = "/" not in lowered
@@ -151,7 +166,7 @@ def _file_priority(rel_path: str) -> int:
     return 4
 
 
-def _collect_files(root: str) -> List[str]:
+def _collect_files(root: str, focus: Optional[List[str]] = None) -> List[str]:
     """Walk ``root`` and return prioritized, capped list of ingestible files."""
     candidates = []
     for dirpath, dirnames, filenames in os.walk(root):
@@ -162,7 +177,7 @@ def _collect_files(root: str) -> List[str]:
                 continue
             full = os.path.join(dirpath, name)
             rel = os.path.relpath(full, root)
-            candidates.append((_file_priority(rel), rel, full))
+            candidates.append((_file_priority(rel, focus), rel, full))
 
     candidates.sort(key=lambda c: (c[0], c[1]))
 
@@ -355,7 +370,9 @@ def _tape_output_path(tape_file: str, root: str):
     return None
 
 
-def load_source_documents(source: str) -> "List[Document]":
+def load_source_documents(
+    source: str, focus: Optional[List[str]] = None
+) -> "List[Document]":
     """Load documents from a GitHub URL or a local file/directory.
 
     Oversized files are truncated so none dominates the model's context, and a
@@ -367,13 +384,13 @@ def load_source_documents(source: str) -> "List[Document]":
     if _is_github_url(source):
         # repomix packs the repo's docs into one blob (README/specs first); cap
         # to the tighter repo budget so we distill signal, not the whole repo.
-        packed = _pack_repo(source)[:MAX_REPO_BYTES]
+        packed = _pack_repo(source, focus)[:MAX_REPO_BYTES]
         docs = [Document(text=packed)]
     else:
         root = source
         if not os.path.exists(root):
             raise FileNotFoundError(f"Source path does not exist: {source}")
-        input_files = [root] if os.path.isfile(root) else _collect_files(root)
+        input_files = [root] if os.path.isfile(root) else _collect_files(root, focus)
         if not input_files:
             raise ValueError(
                 f"No ingestible files ({', '.join(sorted(INGEST_EXTS))}) found in {source}."
