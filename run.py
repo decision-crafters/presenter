@@ -171,9 +171,11 @@ async def main():
     )
     parser.add_argument(
         "--youtube",
-        action="store_true",
-        help="After --export-video, write a YouTube kit (title, description, "
-        "chapters, tags, branded thumbnail) to <deck>/youtube/",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="With --export-video, also write a YouTube kit (title, description, "
+        "chapters, tags, branded thumbnail) to <deck>/youtube/ (default: on; "
+        "--no-youtube to skip)",
     )
     parser.add_argument(
         "--export-video",
@@ -269,15 +271,22 @@ async def main():
     if args.youtube and args.export_video:
         from youtube import build_kit
 
-        build_kit(
-            presentation_dir,
-            llm=llm,
-            design=design,
-            steering="\n\n".join(x for x in [design.voice, persona.steering] if x),
-            series=series,
-            ep=episode,
-            source=args.source,
-        )
+        # Best-effort: the video is already done, so a kit failure only warns.
+        try:
+            build_kit(
+                presentation_dir,
+                llm=llm,
+                design=design,
+                steering="\n\n".join(x for x in [design.voice, persona.steering] if x),
+                series=series,
+                ep=episode,
+                source=args.source,
+            )
+        except Exception as e:
+            print(
+                f"\n! YouTube kit failed ({e}); the video is fine. Retry with: "
+                f"python youtube.py {presentation_dir}\n"
+            )
 
     # A stable, machine-readable line so any caller (agent or script) can locate
     # the outputs without parsing the human-readable log.
