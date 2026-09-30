@@ -33,7 +33,7 @@ from ingest import (
     fetch_repo_tape,
 )
 from agents.demo_narrator import write_demo_walkthrough
-from design import Design, reveal_config_lines, apply_branding
+from design import Design, reveal_config_lines, apply_branding, mermaid_config
 from images import fetch_slide_image, POLLINATIONS_DELAY, MAX_IMAGES
 from utils import (
     get_safe_foldername,
@@ -43,6 +43,7 @@ from utils import (
     demo_slides,
     cta_slide,
     sources_slide,
+    render_mermaid_blocks,
 )
 
 
@@ -418,39 +419,26 @@ class PresenterWorkflow(Workflow):
         with open(template_file, "w") as f:
             f.write(full_presentation_template)
 
-        # using mermaid-cli to render mermaid diagrams
-        print("\n> Rendering diagrams...\n")
+        # Render each mermaid block on its own (utils.render_mermaid_blocks): one
+        # diagram that won't parse is repaired or dropped instead of leaving every
+        # diagram in the deck as raw code. Diagrams take the brand colors.
         presentation_file = os.path.join(presentation_folder, "presentation.md")
-        mmdc_result = subprocess.run(
-            ["mmdc", "-i", template_file, "-o", presentation_file, "-e", "png"]
-        )
-        # mmdc aborts (non-zero, no output file) if a *single* mermaid block fails
-        # to parse. Don't let one bad diagram discard the whole (expensive) run:
-        # fall back to the un-rendered template so the deck still builds.
-        if mmdc_result.returncode != 0 or not os.path.exists(presentation_file):
-            print(
-                "\n> WARNING: mermaid rendering failed (mmdc exit "
-                f"{mmdc_result.returncode}); falling back to un-rendered diagrams. "
-                "If diagrams are missing, install @mermaid-js/mermaid-cli and ensure "
-                "`mmdc` is on PATH.\n"
+        config_path = None
+        theme = mermaid_config(self.design)
+        if theme:
+            config_path = os.path.join(presentation_folder, "mermaid-config.json")
+            with open(config_path, "w") as f:
+                json.dump(theme, f)
+        with open(presentation_file, "w") as f:
+            f.write(
+                render_mermaid_blocks(full_presentation_template, media_dir, config_path)
             )
-            shutil.copyfile(template_file, presentation_file)
 
         with open(presentation_file, "r") as f:
             presentation_content = f.read()
         with open(presentation_file, "w") as f:
             f.write(sanitize_markdown(presentation_content))
 
-        media_dir = os.path.join(presentation_folder, "media")
-        if not os.path.exists(media_dir):
-            os.makedirs(media_dir)
-        # copy all png files from presentation folder to media folder
-        for filename in os.listdir(presentation_folder):
-            if filename.endswith(".png"):
-                os.rename(
-                    os.path.join(presentation_folder, filename),
-                    os.path.join(media_dir, filename),
-                )
 
         # Download any detected demo recordings (e.g. a repo's VHS/asciinema GIF)
         # into media/ so mdslides can embed them; keep a manifest for the Demo

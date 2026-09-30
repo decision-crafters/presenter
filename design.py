@@ -147,6 +147,57 @@ def reveal_config_lines(design: Optional[Design]) -> str:
     )
 
 
+def _mix(a: str, b: str, t: float) -> str:
+    """Blend hex color ``a`` toward ``b`` by ``t`` (0..1)."""
+    def rgb(h):
+        h = h.lstrip("#")
+        h = "".join(c * 2 for c in h) if len(h) == 3 else h[:6]
+        return [int(h[i : i + 2], 16) for i in (0, 2, 4)]
+
+    try:
+        ra, rb = rgb(a), rgb(b)
+    except ValueError:
+        return a
+    return "#" + "".join(f"{round(x + (y - x) * t):02x}" for x, y in zip(ra, rb))
+
+
+def mermaid_config(design: Optional[Design]) -> Optional[dict]:
+    """A mermaid-cli theme built from the brand colors, so diagrams match the
+    slides instead of mermaid's default lavender-on-white. ``None`` (mermaid's
+    defaults) when there is no design or it declares no colors."""
+    if not design or design.is_empty:
+        return None
+    c = design.tokens.get("colors") or {}
+    colors = _colors(design.tokens)
+    bg, text = colors["background"], colors["text"] or colors["heading"]
+    if not bg or not text:
+        return None
+    accent = colors["accent"] or text
+    edge = c.get("secondary") or accent
+    node = c.get("tertiary") or _mix(bg, text, 0.16)
+    font = (_fonts(design.tokens)["body"] or "sans-serif").replace("'", "")
+    return {
+        "theme": "base",
+        "themeVariables": {
+            "background": bg,
+            "fontFamily": font,
+            "fontSize": "18px",
+            "primaryColor": node,
+            "primaryTextColor": text,
+            "primaryBorderColor": edge,
+            "secondaryColor": _mix(bg, text, 0.10),
+            "tertiaryColor": _mix(bg, text, 0.06),
+            "lineColor": edge,
+            "textColor": text,
+            "nodeTextColor": text,
+            "edgeLabelBackground": bg,
+            "clusterBkg": _mix(bg, text, 0.06),
+            "clusterBorder": edge,
+            "titleColor": text,
+        },
+    }
+
+
 def branding_head(design: Design, bg_ref: Optional[str] = None) -> str:
     """`<link>`s for fonts plus a `<style>` overriding reveal CSS variables."""
     tokens = design.tokens
