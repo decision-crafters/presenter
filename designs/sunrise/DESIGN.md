@@ -16,6 +16,11 @@ typography:
     fontSize: "40px"
 fontImports:
   - "https://fonts.googleapis.com/css2?family=Fraunces:wght@500;700&family=Nunito+Sans:wght@400;600&display=swap"
+# Shared video-export settings (see video_settings.py): the spoken closing line
+# on the repo-deck CTA slide. #8 adds resolution, #10 adds watermark/channel.
+video:
+  closingLine: "That's the walkthrough — and the code and demos are right here. Go make it yours."
+  holdSeconds: 4
 ---
 
 # Sunrise

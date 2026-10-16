@@ -16,6 +16,11 @@ typography:
     fontSize: "40px"
 fontImports:
   - "https://fonts.googleapis.com/css2?family=Inter:wght@400;600&family=Space+Grotesk:wght@500;700&display=swap"
+# Shared video-export settings (see video_settings.py): the spoken closing line
+# on the repo-deck CTA slide. #8 adds resolution, #10 adds watermark/channel.
+video:
+  closingLine: "The repo and the demos are linked below. Clone it and run it yourself."
+  holdSeconds: 4
 ---
 
 # Midnight
