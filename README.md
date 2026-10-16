@@ -51,7 +51,7 @@ ollama pull qwen2.5:7b   # or llama3.1:8b
 - Clone the repo
 
 ```bash
-git clone https://github.com/rsrohan99/presenter.git
+git clone https://github.com/decision-crafters/presenter.git
 cd presenter
 ```
 
@@ -102,7 +102,7 @@ python run.py "observer design pattern" --design designs/midnight
 python run.py "observer design pattern" --design designs/sunrise
 ```
 
-  Recognized DESIGN.md keys (all optional): `theme` (a reveal base theme: white/black/league/beige/sky/night/serif/simple/solarized/moon/blood), `codeTheme`, `colors` (`background`, `text`|`foreground`, `heading`|`primary`, `accent`|`link`), `typography.heading.fontFamily` / `typography.body.fontFamily` / `typography.body.fontSize`, `fontImports` (a list of Google-Fonts/CSS URLs), `background.image`, `logo` (+ `logoPosition`), `diagramMaxHeight` (cap for diagram images, default `460px`), a `video:` block (`closingLine`, `holdSeconds`, `resolution`), and a `youtube:` block (`category`, `language`, `descriptionFooter`, `links`, optional `subscribe`). The Markdown body (Overview / Voice / Do's & Don'ts) steers the wording.
+  Recognized DESIGN.md keys (all optional): `theme` (a reveal base theme: white/black/league/beige/sky/night/serif/simple/solarized/moon/blood), `codeTheme`, `colors` (`background`, `text`|`foreground`, `heading`|`primary`, `accent`|`link`), `typography.heading.fontFamily` / `typography.body.fontFamily` / `typography.body.fontSize`, `fontImports` (a list of Google-Fonts/CSS URLs), `background.image`, `logo` (+ `logoPosition`), `diagramMaxHeight` (cap for diagram images, default `400px`), a `video:` block (`closingLine`, `holdSeconds`, `resolution`), and a `youtube:` block (`category`, `language`, `descriptionFooter`, `links`, optional `subscribe`). The Markdown body (Overview / Voice / Do's & Don'ts) steers the wording.
 
 Two rendering niceties apply automatically: a **tall Mermaid diagram is moved onto its own slide** so it isn't cut off (disabled under `--export-video`, which needs one slide per narration), and when a deck is built from `--source`, a **References** slide is appended citing the source repo/file and any reference URLs found in it.
 
@@ -157,7 +157,8 @@ python run.py "observer design pattern" --export-video --resolution 720p   # or 
 - The interactive HTML for the presentation will be at `presentations/<presentation_folder>/output/index.html`
 - The extracted PDF of the presentation will be at `presentations/<presentation_folder>/presentation.pdf`
 - The rendered video with voiceover of the presentation will be at `presentations/<presentation_folder>/presentation.mp4`
-- For scripting, the last line of a successful run is machine-readable: `PRESENTER_RESULT {"presentation_dir": ..., "html": ..., "pdf": ..., "mp4": ...}`. A broken render exits non-zero (no result line).
+- `--export-video` also writes subtitle files (`captions.srt` / `captions.vtt`) and a YouTube kit under `presentations/<presentation_folder>/youtube/` (`metadata.json`, `description.txt`, `thumbnail.jpg`, `index.html`, `UPLOAD_PLAN.md`)
+- For scripting, the last line of a successful run is machine-readable: `PRESENTER_RESULT {"presentation_dir": ..., "html": ..., "pdf": ..., "mp4": ..., "captions": {...}, "youtube": {...}}`. A broken render exits non-zero (no result line).
 
 ## Architecture
 
@@ -177,6 +178,6 @@ flowchart LR
   wf -. "export-video" .-> vid["Kokoro + ffmpeg to mp4"]
 ```
 
-Key modules: `run.py` (CLI), `providers.py` (LLM factory), `ingest.py` (repomix + local ingestion), `guide.py` (content steering), `design.py` (DESIGN.md branding), `workflow.py` (`PresenterWorkflow`), `agents/` (structure and slide agents, Kokoro narrator, video workflow), `utils.py` (render fixes, diagram splitting, references slide).
+Key modules: `run.py` (CLI), `providers.py` (LLM factory), `ingest.py` (repomix + local ingestion), `guide.py` (content steering), `design.py` (DESIGN.md branding), `video_settings.py` (shared video settings: closing line, hold, resolution), `workflow.py` (`PresenterWorkflow`), `agents/` (structure and slide agents, Kokoro narrator, video workflow), `captions.py` (SRT/VTT subtitles), `youtube.py` (YouTube metadata/chapters/thumbnail kit), `utils.py` (render fixes, diagram splitting, references slide).
 
 The full design, decisions (ADRs), and diagrams are in [`DESIGN_DOC.md`](DESIGN_DOC.md).
