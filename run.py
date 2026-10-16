@@ -14,6 +14,7 @@ from images import resolve_image_provider
 from series import load_series, get_episode, episode_folder, episode_steering
 from workflow import PresenterWorkflow
 from agents.video_creator import PresenterVideoCreaterWorkflow
+from video_settings import video_settings, parse_resolution
 
 # Local models are much slower than the OpenAI cloud, so give the workflows a
 # generous timeout (seconds) for structure generation and per-slide composition.
@@ -182,6 +183,13 @@ async def main():
         action="store_true",
         help="Export a video of the presentation with voiceover",
     )
+    parser.add_argument(
+        "--resolution",
+        type=str,
+        default=None,
+        help="Video size: 480p | 720p | 1080p | 1440p | 2160p | WIDTHxHEIGHT "
+        "(overrides the design's video.resolution; default 1080p)",
+    )
     args = parser.parse_args()
 
     # A series episode supplies the source, design, slide count, folder, and a
@@ -229,6 +237,8 @@ async def main():
     design = load_design(args.design or persona.design_ref)
     voice = args.voice or persona.voice or "af_heart"
     lang = args.lang or persona.lang or "a"
+    # Video size: --resolution > design's video.resolution > 1080p default.
+    resolution = parse_resolution(args.resolution, video_settings(design).resolution)
     # Guide body + DESIGN.md voice + persona tone merge into one steering block.
     steering = "\n\n".join(
         x
@@ -263,6 +273,7 @@ async def main():
             voice=voice,
             lang_code=lang,
             pronunciations=persona.pronunciations,
+            resolution=resolution,
             verbose=False,
             timeout=WORKFLOW_TIMEOUT,
         )

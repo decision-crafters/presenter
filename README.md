@@ -102,7 +102,7 @@ python run.py "observer design pattern" --design designs/midnight
 python run.py "observer design pattern" --design designs/sunrise
 ```
 
-  Recognized DESIGN.md keys (all optional): `theme` (a reveal base theme: white/black/league/beige/sky/night/serif/simple/solarized/moon/blood), `codeTheme`, `colors` (`background`, `text`|`foreground`, `heading`|`primary`, `accent`|`link`), `typography.heading.fontFamily` / `typography.body.fontFamily` / `typography.body.fontSize`, `fontImports` (a list of Google-Fonts/CSS URLs), `background.image`, `logo` (+ `logoPosition`), `diagramMaxHeight` (cap for diagram images, default `460px`), a `video:` block (`closingLine`, `holdSeconds`), and a `youtube:` block (`category`, `language`, `descriptionFooter`, `links`, optional `subscribe`). The Markdown body (Overview / Voice / Do's & Don'ts) steers the wording.
+  Recognized DESIGN.md keys (all optional): `theme` (a reveal base theme: white/black/league/beige/sky/night/serif/simple/solarized/moon/blood), `codeTheme`, `colors` (`background`, `text`|`foreground`, `heading`|`primary`, `accent`|`link`), `typography.heading.fontFamily` / `typography.body.fontFamily` / `typography.body.fontSize`, `fontImports` (a list of Google-Fonts/CSS URLs), `background.image`, `logo` (+ `logoPosition`), `diagramMaxHeight` (cap for diagram images, default `460px`), a `video:` block (`closingLine`, `holdSeconds`, `resolution`), and a `youtube:` block (`category`, `language`, `descriptionFooter`, `links`, optional `subscribe`). The Markdown body (Overview / Voice / Do's & Don'ts) steers the wording.
 
 Two rendering niceties apply automatically: a **tall Mermaid diagram is moved onto its own slide** so it isn't cut off (disabled under `--export-video`, which needs one slide per narration), and when a deck is built from `--source`, a **References** slide is appended citing the source repo/file and any reference URLs found in it.
 
@@ -145,10 +145,11 @@ python run.py "my topic" --design .presenter-local/my-brand \
 
   `.presenter-local/` is gitignored, so those files never ship. The engine and the neutral example brands stay public; only your brand's specifics live locally.
 
-- Add `--export-video` argument to generate a full video of the presentation with voiceover (pick a Kokoro voice with `--voice`, or let a `--persona` set it).
+- Add `--export-video` argument to generate a full video of the presentation with voiceover (pick a Kokoro voice with `--voice`, or let a `--persona` set it). Videos render at 1080p by default; choose another size with `--resolution` (or a brand's `video.resolution`):
 
 ```bash
 python run.py "observer design pattern" --export-video
+python run.py "observer design pattern" --export-video --resolution 720p   # or 480p | 1080p | 1440p | 2160p | 1280x720
 ```
 
 - After running the workflow, it'll put all the files (slides, video, pdf etc.) inside the `presentations` folder

@@ -10,7 +10,7 @@ Markdown body describing the brand voice. We consume a documented subset:
 - The Markdown body becomes extra content steering merged into the ``--guide``
   text, so wording/tone matches the brand.
 - A ``video:`` token block is the shared video-export settings (closing line,
-  end-screen hold; resolution/watermark live here in #8/#10). See
+  end-screen hold, resolution; watermark lives here in #10). See
   ``video_settings.video_settings``.
 - A ``youtube:`` token block is the shared upload settings (category, language,
   description footer, links, and an optional subscribe CTA). See
