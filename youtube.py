@@ -18,6 +18,10 @@ description's first ~150 chars are the hook; chapters start at 0:00, need at
 least 3, each >= 10 s; 5-8 tags, each <= 30 chars, <= 500 chars total; 3
 hashtags; thumbnail 1280x720, < 2 MB.
 
+Category, language, a description footer, extra links, and the subscribe CTA
+come from the brand's DESIGN.md ``youtube:`` block (``youtube_settings``) -- never
+the model -- so they stay consistent across every video on the channel.
+
 Usage:
     python youtube.py --series series/<slug>.yaml --episode 1
     python youtube.py presentations/<deck-dir> [--design designs/<brand>]
@@ -30,7 +34,8 @@ import json
 import os
 import re
 import subprocess
-from typing import List, Optional
+from dataclasses import dataclass, field
+from typing import List, Optional, Tuple
 
 from models import load_structure
 
@@ -41,6 +46,61 @@ TAGS_TOTAL_MAX = 500
 MIN_CHAPTER_SECS = 10
 THUMB_W, THUMB_H = 1280, 720
 THUMB_MAX_BYTES = 2 * 1024 * 1024
+
+
+# ---- upload settings (DESIGN.md ``youtube:`` block) ----
+
+@dataclass
+class YouTubeSettings:
+    """Brand YouTube-upload settings from the DESIGN.md ``youtube:`` block.
+
+    ``category`` is YouTube's numeric category id (28 = Science & Technology);
+    ``subscribe`` is an *optional* extra call-to-action line (off by default, so
+    a brand's footer/link CTA stays the only call to action); ``links`` are extra
+    description links as ``(label, url)`` pairs.
+    """
+    category: Optional[int] = None
+    language: Optional[str] = None
+    subscribe: Optional[str] = None
+    description_footer: str = ""
+    links: List[Tuple[str, str]] = field(default_factory=list)
+
+
+def youtube_settings(design) -> YouTubeSettings:
+    """Read the brand's ``youtube:`` tokens into a YouTubeSettings. Empty-safe."""
+    tokens = getattr(design, "tokens", None) or {}
+    yt = tokens.get("youtube") if isinstance(tokens, dict) else None
+    if not isinstance(yt, dict):
+        yt = {}
+
+    category = yt.get("category")
+    try:
+        category = int(category) if category is not None else None
+    except (TypeError, ValueError):
+        category = None
+    language = (yt.get("language") or "").strip() or None
+    subscribe = (yt.get("subscribe") or "").strip() or None
+    footer = (yt.get("descriptionFooter") or yt.get("description_footer") or "").strip()
+
+    links: List[Tuple[str, str]] = []
+    for item in yt.get("links") or []:
+        if isinstance(item, str):
+            label, url = "", item.strip()
+        elif isinstance(item, dict):
+            label = str(item.get("label") or "").strip()
+            url = str(item.get("url") or "").strip()
+        else:
+            continue
+        if url:
+            links.append((label, url))
+
+    return YouTubeSettings(
+        category=category,
+        language=language,
+        subscribe=subscribe,
+        description_footer=footer,
+        links=links,
+    )
 
 
 # ---- chapters (computed from the rendered clips) ----
@@ -194,16 +254,24 @@ def _clean_hashtags(tags: List[str]) -> List[str]:
 
 
 def build_description(meta: dict, chapters: List[dict], source: Optional[str],
-                      series: Optional[dict], ep: Optional[dict]) -> str:
+                      series: Optional[dict], ep: Optional[dict],
+                      yt: Optional[YouTubeSettings] = None) -> str:
     lines = [meta["hook"], "", meta["summary"].strip(), ""]
     if source:
         lines.append(f"▶ Code: {source}")  # brand: the repo link comes first
     if series and ep:
         lines.append(f"▶ Series: {series.get('title')} — part {ep['id']} of {len(series['episodes'])}")
+    if yt:
+        for label, url in yt.links:
+            lines.append(f"▶ {label}: {url}" if label else f"▶ {url}")
+        if yt.subscribe:
+            lines.append(f"Subscribe for more: {yt.subscribe}")
     lines += ["", "Chapters"]
     lines += [f"{_fmt_ts(c['start'])} {c['title']}" for c in chapters]
     if series and series.get("disclaimer"):
         lines += ["", str(series["disclaimer"]).strip()]
+    if yt and yt.description_footer:
+        lines += ["", yt.description_footer]
     lines += ["", " ".join(meta["hashtags"])]
     return "\n".join(lines).strip() + "\n"
 
@@ -356,6 +424,19 @@ def render_page(out_path: str, meta: dict, description: str, chapters: List[dict
         '<section><h2>Thumbnail <a href="thumbnail.jpg" download><button>Download</button></a></h2>'
         f'<img src="thumbnail.jpg" alt="Thumbnail: {esc(meta["thumbnail_text"])}"></section>'
     ]
+    settings = []
+    if meta.get("category") is not None:
+        settings.append(f"Category: {meta['category']}")
+    if meta.get("language"):
+        settings.append(f"Language: {meta['language']}")
+    if meta.get("subscribe"):
+        settings.append(f"Subscribe: {meta['subscribe']}")
+    if settings:
+        blocks.append(
+            '<section><h2>Upload settings</h2><div class="val">'
+            + "<br>".join(esc(s) for s in settings)
+            + "</div></section>"
+        )
     for i, (label, value, count) in enumerate(fields):
         blocks.append(
             f'<section><h2>{label} <span>{count} <button data-copy="f{i}">Copy</button></span></h2>'
@@ -413,6 +494,7 @@ def build_kit(presentation_dir: str, llm=None, design=None, steering: str = "",
     out_dir = os.path.join(presentation_dir, "youtube")
     os.makedirs(out_dir, exist_ok=True)
     meta_file = os.path.join(out_dir, "metadata.json")
+    yt = youtube_settings(design)
 
     chapters = compute_chapters(presentation_dir)
     if len(chapters) < 3:
@@ -442,8 +524,11 @@ def build_kit(presentation_dir: str, llm=None, design=None, steering: str = "",
     if thumbnail_text:
         meta["thumbnail_text"] = thumbnail_text
     meta["chapters"] = [{"time": _fmt_ts(c["start"]), "title": c["title"]} for c in chapters]
-    description = build_description(meta, chapters, source, series, ep)
+    description = build_description(meta, chapters, source, series, ep, yt)
     meta["description"] = description
+    meta["category"] = yt.category
+    meta["language"] = yt.language
+    meta["subscribe"] = yt.subscribe
 
     with open(meta_file, "w") as f:
         json.dump(meta, f, indent=2, ensure_ascii=False)

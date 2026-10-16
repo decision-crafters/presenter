@@ -12,6 +12,9 @@ Markdown body describing the brand voice. We consume a documented subset:
 - A ``video:`` token block is the shared video-export settings (closing line,
   end-screen hold; resolution/watermark live here in #8/#10). See
   ``video_settings.video_settings``.
+- A ``youtube:`` token block is the shared upload settings (category, language,
+  description footer, links, and an optional subscribe CTA). See
+  ``youtube.youtube_settings``.
 
 Branding is additive and optional: with no DESIGN.md the deck renders exactly as
 before.
