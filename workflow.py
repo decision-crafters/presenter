@@ -3,7 +3,6 @@ import re
 import json
 import shutil
 import subprocess
-import pickle
 import time
 import urllib.request
 from typing import Any, List, Optional
@@ -19,7 +18,15 @@ from llama_index.core.workflow import (
 )
 from llama_index.core.workflow.retry_policy import ConstantDelayRetryPolicy
 
-from models import PresentationStructure, StructureFeedback, Slide, SlideInfo
+from models import (
+    PresentationStructure,
+    StructureFeedback,
+    Slide,
+    SlideInfo,
+    load_structure,
+    save_structure,
+    structure_cache_path,
+)
 from agents.structure_creater import create_presentation_structure
 from agents.structure_validator import validate_presentation_structure
 from agents.structure_updater import update_presentation_structure
@@ -58,6 +65,8 @@ def _media_seconds(path: str) -> float:
              "-of", "json", path],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
         )
+        if r.returncode != 0:
+            return 0.0
         return float(json.loads(r.stdout)["format"]["duration"])
     except Exception:
         return 0.0
@@ -192,14 +201,12 @@ class PresenterWorkflow(Workflow):
 
         # A pinned (series episode) folder with a cached structure resumes it.
         if self.presentation_folder:
-            structure_file = os.path.join(self.presentation_folder, "structure.pkl")
-            if os.path.exists(structure_file):
+            if structure_cache_path(self.presentation_folder):
                 print(
                     f"\n> Presentation structure already exists in "
                     f"{self.presentation_folder}. Using the existing structure.\n"
                 )
-                with open(structure_file, "rb") as f:
-                    structure = pickle.load(f)
+                structure = load_structure(self.presentation_folder)
                 await ctx.store.set("topic", self.title or "")
                 await ctx.store.set("presentation_folder", self.presentation_folder)
                 return StructureFinalized(structure=structure)
@@ -217,9 +224,7 @@ class PresenterWorkflow(Workflow):
         os.makedirs(presentation_folder, exist_ok=True)
 
         structure = PresentationStructure(slides=structure_with_title.slides)
-        structure_file = os.path.join(presentation_folder, "structure.pkl")
-        with open(structure_file, "wb") as f:
-            pickle.dump(structure, f)
+        save_structure(presentation_folder, structure)
         return StructureFinalized(structure=structure)
 
     @step
@@ -231,15 +236,12 @@ class PresenterWorkflow(Workflow):
         await ctx.store.set("presentation_folder", presentation_folder)
         if not os.path.exists(presentation_folder):
             os.makedirs(presentation_folder)
-        structure_file = os.path.join(presentation_folder, "structure.pkl")
-        if os.path.exists(structure_file):
+        if structure_cache_path(presentation_folder):
             print(
                 f"\n> Presentation structure already exists for topic: {topic}."
                 " Skipping structure creation and using the existing structure.\n"
             )
-            with open(structure_file, "rb") as f:
-                structure = pickle.load(f)
-            return StructureFinalized(structure=structure)
+            return StructureFinalized(structure=load_structure(presentation_folder))
         return StructureRequestReceived(topic=topic)
 
     @step
@@ -273,12 +275,8 @@ class PresenterWorkflow(Workflow):
         updated_structure = update_presentation_structure(
             topic, structure, feedback, self.llm
         )
-        # pickle the structure in the presentation folder
-        structure_file = os.path.join(
-            await ctx.store.get("presentation_folder"), "structure.pkl"
-        )
-        with open(structure_file, "wb") as f:
-            pickle.dump(updated_structure, f)
+        # Cache the structure in the presentation folder so a rerun resumes it.
+        save_structure(await ctx.store.get("presentation_folder"), updated_structure)
         return StructureFinalized(structure=updated_structure)
 
     @step

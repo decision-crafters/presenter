@@ -317,7 +317,7 @@ Runtime: one local Python process. No server and no database. Configuration come
 
 **Status:** Accepted
 **Context:** Runs are long and often repeated after a small change.
-**Decision:** Persist `structure.pkl`, per slide `content.md` and `narration.txt`, `narration.mp3`, and `clip.mp4`. Each step skips work when its output exists.
+**Decision:** Persist `structure.json`, per slide `content.md` and `narration.txt`, `narration.mp3`, and `clip.mp4`. Each step skips work when its output exists.
 **Consequences:** Fast reruns. Stale output requires a manual delete.
 **Alternatives:** A database, rejected as too heavy for a single user tool.
 

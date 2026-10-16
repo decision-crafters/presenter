@@ -143,7 +143,7 @@ the local Ollama provider.
 
 1. For local Ollama, run `python run.py "your topic"`.
 2. For Ollama Cloud, run `python run.py "your topic" --provider ollama-cloud --model gpt-oss:120b`.
-3. For OpenAI, run `python run.py "your topic" --provider openai --model gpt-4o-mini`.
+3. For OpenAI, run `python run.py "your topic" --provider openai --model gpt-6-luna`.
 
 💡 **Tip**: The model must support structured output. Weak models can fail to return
 valid slide data.

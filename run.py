@@ -83,7 +83,7 @@ async def main():
         "--model",
         type=str,
         default=None,
-        help="LLM model name (e.g. qwen2.5:7b, llama3.1:8b, gpt-4o-mini)",
+        help="LLM model name (e.g. qwen2.5:7b, llama3.1:8b, gpt-6-luna)",
     )
     parser.add_argument(
         "--slides",

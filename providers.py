@@ -20,7 +20,9 @@ DEFAULT_PROVIDER = "ollama"
 DEFAULT_MODELS = {
     "ollama": "qwen2.5:7b",
     "ollama-cloud": "qwen2.5:7b",
-    "openai": "gpt-4o-mini",
+    # gpt-4o-mini is removed from OpenAI's API on 2027-01-14; gpt-6-luna is the
+    # recommended replacement.
+    "openai": "gpt-6-luna",
 }
 
 # Local Ollama models can be slow to cold-start or generate structured output;
