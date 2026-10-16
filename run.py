@@ -268,6 +268,16 @@ async def main():
         )
         await video_creator_workflow.run(presentation_dir=presentation_dir)
 
+        # Captions from the per-slide narration, aligned to the clip timings.
+        # Best-effort: the video is already done, so a failure only warns.
+        try:
+            from captions import write_captions
+
+            caption_paths = write_captions(presentation_dir)
+            print(f"> Wrote captions: {', '.join(caption_paths)}")
+        except Exception as e:
+            print(f"\n! Captions failed ({e}); the video is fine.\n")
+
     if args.youtube and args.export_video:
         from youtube import build_kit
 
@@ -291,11 +301,18 @@ async def main():
     # A stable, machine-readable line so any caller (agent or script) can locate
     # the outputs without parsing the human-readable log.
     mp4 = os.path.join(presentation_dir, "presentation.mp4")
+    caption_files = {}
+    if args.export_video:
+        for key, name in (("srt", "captions.srt"), ("vtt", "captions.vtt")):
+            path = os.path.join(presentation_dir, name)
+            if os.path.exists(path):
+                caption_files[key] = path
     result = {
         "presentation_dir": presentation_dir,
         "html": os.path.join(presentation_dir, "output", "index.html"),
         "pdf": os.path.join(presentation_dir, "presentation.pdf"),
         "mp4": mp4 if (args.export_video and os.path.exists(mp4)) else None,
+        "captions": caption_files or None,
     }
     print("PRESENTER_RESULT " + json.dumps(result))
 
