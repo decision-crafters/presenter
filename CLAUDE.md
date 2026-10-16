@@ -44,7 +44,7 @@ See README.md for the exact install incantations.
 
 `run.py` runs two LlamaIndex `Workflow` classes in sequence:
 1. **`PresenterWorkflow`** (`workflow.py`) — produces slides, HTML, and PDF. Returns the presentation folder path.
-2. **`PresenterVideoCreaterWorkflow`** (`agents/video_creator.py`) — only runs with `--export-video`; consumes that folder to produce narration audio and the final `presentation.mp4`.
+2. **`PresenterVideoCreaterWorkflow`** (`agents/video_creator.py`) — only runs with `--export-video`; consumes that folder to produce narration audio and the final `presentation.mp4`. `run.py` then writes `captions.srt`/`captions.vtt` (`captions.py`) from the per-slide narration aligned to the clip timings.
 
 Both use the fan-out/fan-in pattern: a step emits N `ctx.send_event(...)` events, a `num_workers`-parallel step processes each, and a final step uses `ctx.collect_events(ev, [Event] * N)` to join (returns `None` until all N have arrived). Workflow state uses the llama-index 0.14 API: `await ctx.store.get(...)` / `await ctx.store.set(...)`.
 
@@ -105,7 +105,7 @@ To force regeneration, delete the relevant cached file(s). `get_safe_foldername`
 
 ### Output layout
 
-Everything lands in `presentations/<safe_topic>/` (gitignored): `output/index.html` (interactive deck), `presentation.pdf`, `presentation.mp4`, plus `presentation_template.md` / `presentation.md` intermediates, a `media/` folder of rendered diagram PNGs, and one `slide_<i>/` subfolder per slide.
+Everything lands in `presentations/<safe_topic>/` (gitignored): `output/index.html` (interactive deck), `presentation.pdf`, `presentation.mp4`, `captions.srt`/`captions.vtt`, plus `presentation_template.md` / `presentation.md` intermediates, a `media/` folder of rendered diagram PNGs, and one `slide_<i>/` subfolder per slide.
 
 ### Markdown post-processing (`utils.py`)
 
