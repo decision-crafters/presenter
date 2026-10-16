@@ -9,6 +9,9 @@ Markdown body describing the brand voice. We consume a documented subset:
   override injected into the rendered deck (so branding also flows into the PDF).
 - The Markdown body becomes extra content steering merged into the ``--guide``
   text, so wording/tone matches the brand.
+- A ``video:`` token block is the shared video-export settings (closing line,
+  end-screen hold; resolution/watermark live here in #8/#10). See
+  ``video_settings.video_settings``.
 
 Branding is additive and optional: with no DESIGN.md the deck renders exactly as
 before.

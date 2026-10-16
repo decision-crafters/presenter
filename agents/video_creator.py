@@ -262,7 +262,15 @@ class PresenterVideoCreaterWorkflow(Workflow):
                 caption_mp3 = None
             if caption_mp3 and not os.path.exists(caption_mp3):
                 caption_mp3 = None
-            duration = max(_media_duration(caption_mp3) if caption_mp3 else 0.0, 4.0)
+            # The CTA frame holds on screen for hold_seconds after the outro
+            # finishes, so the links stay readable (the shared `video:` setting).
+            try:
+                hold_seconds = max(0.0, float(closing.get("hold_seconds", 4.0)))
+            except (TypeError, ValueError):
+                hold_seconds = 4.0
+            duration = (
+                _media_duration(caption_mp3) if caption_mp3 else 0.0
+            ) + hold_seconds
             if not _build_demo_clip(shot, caption_mp3, duration, clip_file):
                 return None
         return os.path.relpath(clip_file, presentation_dir)

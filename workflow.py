@@ -41,6 +41,7 @@ from ingest import (
 )
 from agents.demo_narrator import write_demo_walkthrough
 from design import Design, reveal_config_lines, apply_branding, mermaid_config
+from video_settings import video_settings
 from images import fetch_slide_image, POLLINATIONS_DELAY, MAX_IMAGES
 from utils import (
     get_safe_foldername,
@@ -505,18 +506,29 @@ class PresenterWorkflow(Workflow):
             from utils import SLIDES_SEPARATOR
             total_slides = deck_md.count(SLIDES_SEPARATOR) + 1
             cta_index = total_slides - (1 if ref_md else 0)  # CTA precedes References
-            narration = (
-                "Those are the sources behind this research, all listed on "
-                "screen. Dig into them, test the claims against your own work, "
-                "and draw your own conclusions."
-                if is_document
-                else "That wraps up the walkthrough. The code, demos, and "
-                "documentation are all linked on screen — grab them from the "
-                "project's repository."
-            )
+            if is_document:
+                # Research decks close on their cited sources, not a repo CTA.
+                narration = (
+                    "Those are the sources behind this research, all listed on "
+                    "screen. Dig into them, test the claims against your own work, "
+                    "and draw your own conclusions."
+                )
+                hold_seconds = 4.0
+            else:
+                # Repo decks close on the brand's own closing line + an end-screen
+                # hold (the shared `video:` settings block).
+                settings = video_settings(self.design)
+                narration = settings.closing_line
+                hold_seconds = settings.hold_seconds
             with open(closing_file, "w") as f:
                 json.dump(
-                    {"screenshot_index": cta_index, "narration": narration}, f, indent=2
+                    {
+                        "screenshot_index": cta_index,
+                        "narration": narration,
+                        "hold_seconds": hold_seconds,
+                    },
+                    f,
+                    indent=2,
                 )
         elif os.path.exists(closing_file):
             os.remove(closing_file)
