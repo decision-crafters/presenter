@@ -86,7 +86,7 @@ python run.py --source ./research.md
 
 ```bash
 python run.py "observer design pattern" --provider ollama-cloud --model qwen2.5:7b
-python run.py "observer design pattern" --provider openai --model gpt-4o-mini
+python run.py "observer design pattern" --provider openai --model gpt-6-luna
 ```
 
 - Steer the deck with a guidance file (`--guide`). This is a `SKILL.md`/`AGENT.md` in the [Agent Skills format](https://agentskills.io/specification); its Markdown body is injected into the generation prompts. It's optional and additive — great for focusing a broad source on one angle (an example ships in `guides/token-focus/`). If you drop an `AGENT.md` or `SKILL.md` in the project root, it's picked up automatically.

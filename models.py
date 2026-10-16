@@ -1,4 +1,7 @@
+import json
+import os
 from typing import List, Optional
+
 from pydantic import BaseModel, Field
 
 
@@ -94,3 +97,44 @@ class Slide(BaseModel):
         None,
         description="Optional short search phrase or prompt for a supporting photo, only when a picture would strengthen the slide and it has no diagram",
     )
+
+
+# ---- structure cache (JSON, migrated from a legacy pickle) ----
+
+STRUCTURE_FILE = "structure.json"
+_LEGACY_STRUCTURE_FILE = "structure.pkl"
+
+
+def structure_cache_path(folder: str) -> Optional[str]:
+    """Path to a cached structure, preferring JSON over the legacy pickle."""
+    for name in (STRUCTURE_FILE, _LEGACY_STRUCTURE_FILE):
+        path = os.path.join(folder, name)
+        if os.path.exists(path):
+            return path
+    return None
+
+
+def save_structure(folder: str, structure: "PresentationStructure") -> str:
+    """Persist the presentation structure as JSON; returns the file path."""
+    path = os.path.join(folder, STRUCTURE_FILE)
+    with open(path, "w") as f:
+        f.write(structure.model_dump_json(indent=2))
+    return path
+
+
+def load_structure(folder: str) -> "PresentationStructure":
+    """Load a cached structure, migrating a legacy ``structure.pkl`` to JSON."""
+    path = structure_cache_path(folder)
+    if path is None:
+        raise FileNotFoundError(f"No structure cache in {folder}")
+    if path.endswith(STRUCTURE_FILE):
+        with open(path) as f:
+            return PresentationStructure.model_validate_json(f.read())
+    # One-time migration from the pre-JSON pickle cache.
+    import pickle
+
+    with open(path, "rb") as f:
+        structure = pickle.load(f)
+    os.remove(path)
+    save_structure(folder, structure)
+    return structure

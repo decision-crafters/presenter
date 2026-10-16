@@ -1,9 +1,7 @@
 from typing import Any
 import subprocess
-import shlex
 import os
 import json
-import pickle
 
 from llama_index.core.workflow import (
     step,
@@ -15,7 +13,7 @@ from llama_index.core.workflow import (
 )
 from llama_index.core.workflow.retry_policy import ConstantDelayRetryPolicy
 
-from models import PresentationStructure
+from models import PresentationStructure, load_structure, structure_cache_path
 from agents.narrator import narrate
 
 
@@ -42,6 +40,8 @@ def _media_duration(path: str) -> float:
              "-of", "json", path],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
         )
+        if r.returncode != 0:
+            return 0.0
         return float(json.loads(r.stdout)["format"]["duration"])
     except Exception:
         return 0.0
@@ -101,11 +101,9 @@ class PresenterVideoCreaterWorkflow(Workflow):
     ) -> NarrationRequestReceived | StopEvent:
         presentation_dir = ev.presentation_dir
         await ctx.store.set("presentation_dir", presentation_dir)
-        structure_file = os.path.join(presentation_dir, "structure.pkl")
-        if not os.path.exists(structure_file):
+        if not structure_cache_path(presentation_dir):
             return StopEvent(result="No structure found")
-        with open(structure_file, "rb") as f:
-            structure: PresentationStructure = pickle.load(f)
+        structure: PresentationStructure = load_structure(presentation_dir)
         await ctx.store.set("structure", structure)
         slides = structure.slides
         await ctx.store.set("num_slides", len(slides))
@@ -147,31 +145,43 @@ class PresenterVideoCreaterWorkflow(Workflow):
             presentation_dir, f"presentation_{slide_index+1}_1280x720.png"
         )
         slide_audio_file = os.path.join(slide_dir, "narration.mp3")
-        file_duration_command = [
-            "ffprobe",
-            "-v",
-            "error",
-            "-show_entries",
-            "format=duration",
-            "-of",
-            "json",
-            slide_audio_file,
-        ]
         result = subprocess.run(
-            file_duration_command,
+            [
+                "ffprobe",
+                "-v", "error",
+                "-show_entries", "format=duration",
+                "-of", "json",
+                slide_audio_file,
+            ],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
         )
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"ffprobe failed for {slide_audio_file}: "
+                f"{result.stderr.strip()[-300:]}"
+            )
         output = json.loads(result.stdout)
         duration = float(output["format"]["duration"]) / NARRATION_TEMPO + 0.5
-        subprocess.run(
-            shlex.split(
-                f"""ffmpeg -loop 1 -i {slide_ss_file} -i {slide_audio_file} -c:v libx264 -c:a aac -b:a 192k -ar 48000 -ac 2 -shortest -t {duration} -vf "format=yuv420p" -filter:a "atempo={NARRATION_TEMPO}" {slide_clip_file}"""
-            ),
+        r = subprocess.run(
+            [
+                "ffmpeg", "-y", "-loop", "1", "-i", slide_ss_file,
+                "-i", slide_audio_file,
+                "-c:v", "libx264", "-c:a", "aac", "-b:a", "192k",
+                "-ar", "48000", "-ac", "2", "-shortest", "-t", f"{duration:.3f}",
+                "-vf", "format=yuv420p",
+                "-filter:a", f"atempo={NARRATION_TEMPO}",
+                slide_clip_file,
+            ],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
+        if r.returncode != 0 or not os.path.exists(slide_clip_file):
+            raise RuntimeError(
+                f"ffmpeg failed to build {slide_clip_file}: "
+                f"{(r.stderr or b'').decode(errors='ignore').strip()[-300:]}"
+            )
         print(f"\n> Created clip for slide_{slide_index}\n")
         return SlideClipCreated(slide_index=slide_index, clip_file=slide_clip_file)
 
@@ -280,12 +290,18 @@ class PresenterVideoCreaterWorkflow(Workflow):
             f.write("\n".join(clips))
         presentation_video_file = os.path.join(presentation_dir, "presentation.mp4")
         print("\n> Rendering full presentation video...\n")
-        subprocess.run(
-            shlex.split(
-                f"""ffmpeg -y -f concat -safe 0 -i {all_clips_file} -c copy {presentation_video_file}"""
-            ),
+        r = subprocess.run(
+            [
+                "ffmpeg", "-y", "-f", "concat", "-safe", "0",
+                "-i", all_clips_file, "-c", "copy", presentation_video_file,
+            ],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
+        if r.returncode != 0 or not os.path.exists(presentation_video_file):
+            raise RuntimeError(
+                f"ffmpeg concat failed: "
+                f"{(r.stderr or b'').decode(errors='ignore').strip()[-300:]}"
+            )
         print(f'\n> Presentation video created: "open {presentation_video_file}"\n')
         return StopEvent(result="Presentation video created")

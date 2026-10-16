@@ -27,10 +27,11 @@ import argparse
 import html
 import json
 import os
-import pickle
 import re
 import subprocess
 from typing import List, Optional
+
+from models import load_structure
 
 TITLE_MAX = 60
 HOOK_MAX = 150
@@ -49,6 +50,8 @@ def _duration(path: str) -> float:
          "-of", "default=nw=1:nk=1", path],
         capture_output=True, text=True,
     )
+    if out.returncode != 0:
+        return 0.0
     try:
         return float(out.stdout.strip())
     except ValueError:
@@ -56,8 +59,7 @@ def _duration(path: str) -> float:
 
 
 def _slide_titles(presentation_dir: str) -> List[str]:
-    with open(os.path.join(presentation_dir, "structure.pkl"), "rb") as f:
-        structure = pickle.load(f)
+    structure = load_structure(presentation_dir)
     return [s.title for s in structure.slides]
 
 
@@ -134,8 +136,7 @@ Video context:
 
 
 def _video_context(presentation_dir: str, series: Optional[dict], ep: Optional[dict]) -> str:
-    with open(os.path.join(presentation_dir, "structure.pkl"), "rb") as f:
-        structure = pickle.load(f)
+    structure = load_structure(presentation_dir)
     parts = []
     if series and ep:
         parts.append(
