@@ -1,7 +1,7 @@
 # Presenter User Guide
 
-**Version**: 0.3.0
-**Last Updated**: 2026-09-21
+**Version**: 0.4.0
+**Last Updated**: 2026-10-16
 **Maintainers**: Presenter project
 
 ---
@@ -178,13 +178,18 @@ guide follows the Agent Skills format (`SKILL.md` or `AGENT.md`).
 #### Overview
 
 A `DESIGN.md` file sets the theme, colors, fonts, background, and logo. The
-branding applies to the HTML and the PDF. The two shipped themes are `midnight`
-and `sunrise`.
+branding applies to the HTML and the PDF. Shipped themes are `midnight` and
+`sunrise`, plus a neutral `youtube-example` that demonstrates the optional
+`youtube:` upload settings. The `DESIGN.md` also carries a `video:` block (the
+spoken closing line, end-screen hold, and resolution) and a `youtube:` block
+(category, language, description footer, links, optional subscribe call-to-action).
 
 #### How to use
 
 1. Run `python run.py "your topic" --design designs/midnight`.
 2. To brand every deck, save your own `DESIGN.md` in the project root.
+3. To keep a brand private, copy the example into a gitignored
+   `.presenter-local/<brand>/` folder and point `--design` / `--persona` at it.
 
 💡 **Tip**: The Markdown body of a `DESIGN.md` also steers the wording toward the
 brand voice.
@@ -207,14 +212,19 @@ default.
 
 #### Overview
 
-Presenter can render an MP4 with narration for every slide.
+Presenter can render an MP4 with narration for every slide. Videos render at
+1080p by default; captions (`captions.srt` / `captions.vtt`) and a YouTube kit
+are written alongside.
 
 #### How to use
 
 1. Run `python run.py "your topic" --export-video`.
 2. To pick a narration voice, add `--voice af_heart`.
+3. To choose a size, add `--resolution 720p` (480p | 720p | 1080p | 1440p |
+   2160p | `WIDTHxHEIGHT`).
 
-**✅ Verification**: `presentations/<slug>/presentation.mp4` exists.
+**✅ Verification**: `presentations/<slug>/presentation.mp4` exists, along with
+`captions.srt`/`captions.vtt` and a `youtube/` kit folder.
 
 ### Choose a persona
 
@@ -316,14 +326,17 @@ still frame.
 #### Overview
 
 For a source based deck, Presenter adds a small footer with the repository on
-every slide. Presenter ends the deck with a "Get the Code" slide that lists the
-repository and the demo links. The exported video ends on that same closing
-slide.
+every slide. Presenter ends the deck with a closing call-to-action slide that
+lists the repository and the demo links; a single research document instead
+closes on a "Sources" slide. The exported video ends on that same closing slide,
+spoken with the brand's `video.closingLine` and held on screen for `holdSeconds`.
 
 #### How to use
 
 1. Run `python run.py --source https://github.com/owner/repo --export-video`.
 2. Open the last slide of the deck, or the end of the video, to see the links.
+3. To change the spoken outro, set `closingLine` under the `video:` block in a
+   `DESIGN.md`.
 
 ### Find and open the output
 
@@ -335,7 +348,8 @@ Every run writes to a folder named after the deck under `presentations/`.
 
 1. Open `presentations/<slug>/output/index.html` for the interactive deck.
 2. Open `presentations/<slug>/presentation.pdf` for the PDF.
-3. Read the `PRESENTER_RESULT` line for the exact paths.
+3. For a video, `presentations/<slug>/presentation.mp4`, plus `captions.srt`/`captions.vtt` and a `youtube/` kit folder.
+4. Read the `PRESENTER_RESULT` line for the exact paths.
 
 ---
 
@@ -471,6 +485,8 @@ ran and the full output.
 | `--suggest-persona-issue` | With `--persona auto`, offer to file a GitHub issue when no persona fits. | off |
 | `--persona-issue-repo` | The target repository for a persona gap issue. | current repo |
 | `--export-video` | Export a narrated MP4. | off |
+| `--resolution` | Video size: `480p`, `720p`, `1080p`, `1440p`, `2160p`, or `WIDTHxHEIGHT`. | design `video.resolution`, then `1080p` |
+| `--youtube` | After `--export-video`, write a YouTube kit (title, description, tags, chapters, thumbnail). Use `--no-youtube` to skip. | on |
 
 ### Glossary
 
@@ -495,3 +511,4 @@ ran and the full output.
 |---------|------|---------|
 | 0.2.0 | 2026-09-21 | First user guide. |
 | 0.3.0 | 2026-09-21 | Added personas, technical-term pronunciation, voice and gender matching, persona auto-select with a gap issue, demo embedding with a narrated walkthrough, a source footer, and a closing call-to-action. |
+| 0.4.0 | 2026-10-16 | Added captions (SRT/VTT), a YouTube kit (metadata, chapters, thumbnail, upload plan), configurable video resolution and closing line, and private brands via `.presenter-local/`. |
