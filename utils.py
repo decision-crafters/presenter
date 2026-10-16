@@ -1,3 +1,4 @@
+import html
 import os
 import re
 
@@ -33,7 +34,7 @@ def sanitize_markdown(text: str) -> str:
     )
     pattern2 = r"^(#{1,2})\s"
     result = re.sub(pattern2, r"### ", result, flags=re.M)
-    pattern3 = r"!\[.+\]\(\./(.*?\.png)\)"
+    pattern3 = r"!\[[^\]]*\]\(\./(?!media/)([^)]*?\.png)\)"  # never re-prefix ./media/
     result = re.sub(pattern3, r"![diagram](./media/\1)", result, flags=re.M)
     result = result.replace("flowchart TD", "flowchart LR")
     result = _fix_timeline_periods(result)
@@ -57,6 +58,73 @@ def _fix_timeline_periods(text: str) -> str:
     return re.sub(r"(?s)```mermaid(.*?)```", _fix_block, text)
 
 
+# Diagrams render at 2x so small ones stay sharp once reveal scales the slide.
+DIAGRAM_SCALE = 2
+_MERMAID_BLOCK_RE = re.compile(r"```mermaid[ \t]*\n(.*?)```", re.S)
+
+
+def repair_mermaid(code: str) -> str:
+    """Fix edge syntax models commonly get wrong before handing it to mmdc.
+
+    ``C|label| E`` (a label with no arrow) is a parse error; it means
+    ``C -->|label| E``.
+    """
+    return re.sub(r"^(\s*\w+)\s*\|([^|\n]+)\|\s*", r"\1 -->|\2| ", code, flags=re.M)
+
+
+def _render_one_diagram(code: str, png_path: str, config_path) -> "tuple[bool, str]":
+    import subprocess
+    import tempfile
+
+    fd, mmd_path = tempfile.mkstemp(suffix=".mmd")
+    with os.fdopen(fd, "w") as f:
+        f.write(code)
+    cmd = ["mmdc", "-i", mmd_path, "-o", png_path, "-s", str(DIAGRAM_SCALE)]
+    if config_path:
+        cmd += ["-c", config_path, "-b", "transparent"]
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True)
+    finally:
+        os.remove(mmd_path)
+    ok = r.returncode == 0 and os.path.exists(png_path)
+    err = next((l for l in r.stderr.splitlines() if "error" in l.lower()), r.stderr[:200])
+    return ok, err.strip()
+
+
+def render_mermaid_blocks(markdown: str, media_dir: str, config_path=None) -> str:
+    """Render every Mermaid block to its own PNG in ``media_dir``.
+
+    Rendering one block at a time means a diagram that won't parse costs only
+    itself -- mmdc on the whole file aborts on the first bad block, which used to
+    leave *every* diagram as raw code. A block is repaired first; if it still
+    fails it is dropped (with a warning) rather than shown as source code.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    blocks = list(_MERMAID_BLOCK_RE.finditer(markdown))
+    if not blocks:
+        return markdown
+    print(f"\n> Rendering {len(blocks)} diagram(s)...\n")
+    os.makedirs(media_dir, exist_ok=True)
+    jobs = [
+        (repair_mermaid(m.group(1)), os.path.join(media_dir, f"diagram-{i + 1}.png"))
+        for i, m in enumerate(blocks)
+    ]
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        results = list(pool.map(lambda j: _render_one_diagram(j[0], j[1], config_path), jobs))
+
+    out, last = [], 0
+    for i, (m, (ok, err)) in enumerate(zip(blocks, results)):
+        out.append(markdown[last : m.start()])
+        if ok:
+            out.append(f"![diagram](./media/diagram-{i + 1}.png)")
+        else:
+            print(f"> WARNING: diagram {i + 1} could not be rendered and was dropped: {err}")
+        last = m.end()
+    out.append(markdown[last:])
+    return "".join(out)
+
+
 # Only Mermaid diagram PNGs are eligible for the own-slide split; fetched photos
 # (.jpg) and demo GIFs stay with their own slide.
 _IMG_RE = re.compile(r"!\[[^\]]*\]\(\./media/([^)]+\.png)\)")
@@ -72,7 +140,8 @@ def _diagram_is_oversized(path: str) -> bool:
             w, h = im.size
     except Exception:
         return False
-    return (h > 300 and h / max(w, 1) > 1.1) or h > 560
+    h = h / DIAGRAM_SCALE  # thresholds are in 1x pixels
+    return (h > 300 and h / max(w / DIAGRAM_SCALE, 1) > 1.1) or h > 560
 
 
 def split_oversized_diagrams(markdown: str, media_dir: str) -> str:
@@ -114,6 +183,20 @@ def references_slide(source, urls) -> str:
     if len(lines) <= 2:  # nothing to cite
         return ""
     return SLIDES_SEPARATOR + "\n".join(lines) + "\n"
+
+
+def sources_slide(citations, urls=None) -> str:
+    """Closing 'Sources' slide for a research/document deck: the works the
+    source itself cites, then any URLs found in it. Rendered as a compact HTML
+    list (research write-ups often cite 10+ works, which overflow at the deck's
+    normal bullet size). Returns '' when empty."""
+    items = list(citations or []) + [u for u in (urls or []) if u not in (citations or [])]
+    if not items:
+        return ""
+    lis = "\n".join(f"<li>{html.escape(item)}</li>" for item in items)
+    size = "0.6em" if len(items) > 8 else "0.8em"
+    body = f'<ul style="font-size:{size}; line-height:1.35">\n{lis}\n</ul>'
+    return SLIDES_SEPARATOR + "### Sources\n\n" + body + "\n"
 
 
 def demo_slides(items) -> str:

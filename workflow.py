@@ -28,11 +28,12 @@ from agents.structure_creater_from_data import create_presentation_structure_fro
 from ingest import (
     load_source_documents,
     extract_reference_urls,
+    extract_source_citations,
     extract_demo_media,
     fetch_repo_tape,
 )
 from agents.demo_narrator import write_demo_walkthrough
-from design import Design, reveal_config_lines, apply_branding
+from design import Design, reveal_config_lines, apply_branding, mermaid_config
 from images import fetch_slide_image, POLLINATIONS_DELAY, MAX_IMAGES
 from utils import (
     get_safe_foldername,
@@ -41,6 +42,8 @@ from utils import (
     references_slide,
     demo_slides,
     cta_slide,
+    sources_slide,
+    render_mermaid_blocks,
 )
 
 
@@ -126,6 +129,15 @@ class SlideCreated(Event):
     image_query: Optional[str] = None
 
 
+def _venv_tool(name: str) -> str:
+    """A console script installed in this interpreter's environment (e.g. the
+    project .venv) even when that env isn't activated, else the bare name."""
+    import sys
+
+    candidate = os.path.join(os.path.dirname(sys.executable), name)
+    return candidate if os.path.exists(candidate) else name
+
+
 class PresenterWorkflow(Workflow):
     def __init__(
         self,
@@ -136,6 +148,9 @@ class PresenterWorkflow(Workflow):
         design: Optional[Design] = None,
         split_diagrams: bool = True,
         images_provider: Optional[str] = None,
+        presentation_folder: Optional[str] = None,
+        title: Optional[str] = None,
+        source_focus: Optional[List[str]] = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
@@ -145,6 +160,11 @@ class PresenterWorkflow(Workflow):
         self.design = design
         self.split_diagrams = split_diagrams
         self.images_provider = images_provider
+        # A series episode (series.py) pins its folder and title so reruns land
+        # in the same place instead of a folder named after an LLM-chosen title.
+        self.presentation_folder = presentation_folder
+        self.title = title
+        self.source_focus = source_focus
 
     @step
     async def start(self, ctx: Context, ev: StartEvent) -> TopicFound | SourceProvided:
@@ -165,16 +185,34 @@ class PresenterWorkflow(Workflow):
         self, ctx: Context, ev: SourceProvided
     ) -> StructureFinalized:
         source = await ctx.store.get("source")
-        documents = load_source_documents(source)
+        documents = load_source_documents(source, self.source_focus)
         await ctx.store.set("reference_urls", extract_reference_urls(documents))
+        await ctx.store.set("source_citations", extract_source_citations(documents))
         await ctx.store.set("demo_media", extract_demo_media(documents, source))
+
+        # A pinned (series episode) folder with a cached structure resumes it.
+        if self.presentation_folder:
+            structure_file = os.path.join(self.presentation_folder, "structure.pkl")
+            if os.path.exists(structure_file):
+                print(
+                    f"\n> Presentation structure already exists in "
+                    f"{self.presentation_folder}. Using the existing structure.\n"
+                )
+                with open(structure_file, "rb") as f:
+                    structure = pickle.load(f)
+                await ctx.store.set("topic", self.title or "")
+                await ctx.store.set("presentation_folder", self.presentation_folder)
+                return StructureFinalized(structure=structure)
+
         structure_with_title = create_presentation_structure_from_data(
             documents, self.llm, self.target_slides, self.guide
         )
-        topic = structure_with_title.title
+        topic = self.title or structure_with_title.title
         await ctx.store.set("topic", topic)
 
-        presentation_folder = os.path.join("presentations", get_safe_foldername(topic))
+        presentation_folder = self.presentation_folder or os.path.join(
+            "presentations", get_safe_foldername(topic)
+        )
         await ctx.store.set("presentation_folder", presentation_folder)
         os.makedirs(presentation_folder, exist_ok=True)
 
@@ -381,39 +419,26 @@ class PresenterWorkflow(Workflow):
         with open(template_file, "w") as f:
             f.write(full_presentation_template)
 
-        # using mermaid-cli to render mermaid diagrams
-        print("\n> Rendering diagrams...\n")
+        # Render each mermaid block on its own (utils.render_mermaid_blocks): one
+        # diagram that won't parse is repaired or dropped instead of leaving every
+        # diagram in the deck as raw code. Diagrams take the brand colors.
         presentation_file = os.path.join(presentation_folder, "presentation.md")
-        mmdc_result = subprocess.run(
-            ["mmdc", "-i", template_file, "-o", presentation_file, "-e", "png"]
-        )
-        # mmdc aborts (non-zero, no output file) if a *single* mermaid block fails
-        # to parse. Don't let one bad diagram discard the whole (expensive) run:
-        # fall back to the un-rendered template so the deck still builds.
-        if mmdc_result.returncode != 0 or not os.path.exists(presentation_file):
-            print(
-                "\n> WARNING: mermaid rendering failed (mmdc exit "
-                f"{mmdc_result.returncode}); falling back to un-rendered diagrams. "
-                "If diagrams are missing, install @mermaid-js/mermaid-cli and ensure "
-                "`mmdc` is on PATH.\n"
+        config_path = None
+        theme = mermaid_config(self.design)
+        if theme:
+            config_path = os.path.join(presentation_folder, "mermaid-config.json")
+            with open(config_path, "w") as f:
+                json.dump(theme, f)
+        with open(presentation_file, "w") as f:
+            f.write(
+                render_mermaid_blocks(full_presentation_template, media_dir, config_path)
             )
-            shutil.copyfile(template_file, presentation_file)
 
         with open(presentation_file, "r") as f:
             presentation_content = f.read()
         with open(presentation_file, "w") as f:
             f.write(sanitize_markdown(presentation_content))
 
-        media_dir = os.path.join(presentation_folder, "media")
-        if not os.path.exists(media_dir):
-            os.makedirs(media_dir)
-        # copy all png files from presentation folder to media folder
-        for filename in os.listdir(presentation_folder):
-            if filename.endswith(".png"):
-                os.rename(
-                    os.path.join(presentation_folder, filename),
-                    os.path.join(media_dir, filename),
-                )
 
         # Download any detected demo recordings (e.g. a repo's VHS/asciinema GIF)
         # into media/ so mdslides can embed them; keep a manifest for the Demo
@@ -459,29 +484,44 @@ class PresenterWorkflow(Workflow):
         if self.split_diagrams:
             deck_md = split_oversized_diagrams(deck_md, media_dir)
         demo_md = demo_slides(demo_items)
-        cta_md = cta_slide(source, [d["url"] for d in demo_items])
-        ref_md = references_slide(source, await ctx.store.get("reference_urls"))
+        reference_urls = await ctx.store.get("reference_urls", default=[])
+        # A single research document (Markdown/PDF file) has no code to "get":
+        # close on the works it cites instead of a repo CTA + References slide.
+        is_document = bool(source) and os.path.isfile(source)
+        if is_document:
+            citations = await ctx.store.get("source_citations", default=[])
+            cta_md = sources_slide(citations, reference_urls)
+            ref_md = ""
+        else:
+            cta_md = cta_slide(source, [d["url"] for d in demo_items])
+            ref_md = references_slide(source, reference_urls)
         deck_md += demo_md + cta_md + ref_md
         with open(presentation_file, "w") as f:
             f.write(deck_md)
 
-        # The CTA slide is appended (not a narrated structure slide), so the video
-        # wouldn't include it. Record its screenshot index + an outro so the video
-        # workflow can append a closing clip — every recording ends on the links.
+        # The closing slide is appended (not a narrated structure slide), so the
+        # video wouldn't include it. Record its screenshot index + an outro so the
+        # video workflow can append a closing clip — every recording ends on it.
+        closing_file = os.path.join(presentation_folder, "closing.json")
         if cta_md:
             from utils import SLIDES_SEPARATOR
             total_slides = deck_md.count(SLIDES_SEPARATOR) + 1
             cta_index = total_slides - (1 if ref_md else 0)  # CTA precedes References
-            closing = {
-                "screenshot_index": cta_index,
-                "narration": (
-                    "That wraps up the walkthrough. The code, demos, and "
-                    "documentation are all linked on screen — grab them from the "
-                    "project's repository."
-                ),
-            }
-            with open(os.path.join(presentation_folder, "closing.json"), "w") as f:
-                json.dump(closing, f, indent=2)
+            narration = (
+                "Those are the sources behind this research, all listed on "
+                "screen. Dig into them, test the claims against your own work, "
+                "and draw your own conclusions."
+                if is_document
+                else "That wraps up the walkthrough. The code, demos, and "
+                "documentation are all linked on screen — grab them from the "
+                "project's repository."
+            )
+            with open(closing_file, "w") as f:
+                json.dump(
+                    {"screenshot_index": cta_index, "narration": narration}, f, indent=2
+                )
+        elif os.path.exists(closing_file):
+            os.remove(closing_file)
 
         # using mdslides to render presentation
         print("\n> Rendering presentation...\n")
@@ -490,7 +530,7 @@ class PresenterWorkflow(Workflow):
         pdf_file = os.path.join(presentation_folder, "presentation.pdf")
         mdslides_result = subprocess.run(
             [
-                "mdslides",
+                _venv_tool("mdslides"),
                 presentation_file,
                 "--include",
                 media_dir,
