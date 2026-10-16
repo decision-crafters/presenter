@@ -8,9 +8,15 @@ pronunciation tweaks are applied at synthesis time, never saved), so captions
 match what a viewer should read.
 
 Writes ``<presentation_dir>/captions.srt`` and ``captions.vtt``. A slide's
-narration is split into short, subtitle-sized chunks and spread proportionally
-across that slide's clip duration -- accurate enough to follow along, without
-needing per-word timestamps from the TTS engine.
+narration is wrapped into caption cues of at most two lines of at most
+``MAX_LINE_CHARS`` characters, broken at word and clause boundaries, and spread
+proportionally across that slide's clip duration -- accurate enough to follow
+along, without needing per-word timestamps from the TTS engine. The trailing cue
+is never a one/two-word orphan.
+
+Because clip durations are derived from the actual narration audio (plus a small
+pad), spreading cues proportionally to character count keeps reading speed at the
+TTS speaking pace -- well under the ~17-20 chars/sec subtitle ceiling.
 """
 
 import json
@@ -19,11 +25,16 @@ import re
 import subprocess
 from typing import List, Optional, Tuple
 
-MAX_CHARS = 80      # ~2 lines of ~40 chars -- the usual subtitle ceiling
-MIN_CUE_SECS = 1.0  # a cue shorter than this would flash; floor it
+MAX_LINE_CHARS = 42   # characters per caption line (subtitle ceiling)
+MIN_CUE_SECS = 1.0    # a cue shorter than this would flash; floor it
+MAX_CUE_SECS = 7.0    # a cue longer than this overstays on a still frame
+ORPHAN_WORDS = 2      # a trailing line of <= this many words is merged upward
 
 # A caption event: (start_seconds, end_seconds, text).
 Caption = Tuple[float, float, str]
+
+# Punctuation a caption line may end on (kept with the fragment it closes).
+_CLAUSE_END = re.compile(r"[,;:—–.!?]$")
 
 
 def _duration(path: str) -> float:
@@ -40,58 +51,107 @@ def _duration(path: str) -> float:
         return 0.0
 
 
-def _split_captions(text: str, max_chars: int = MAX_CHARS) -> List[str]:
-    """Split narration prose into subtitle-sized chunks (<= max_chars each),
-    preferring sentence boundaries and breaking long sentences at word edges."""
-    sentences = re.split(r"(?<=[.!?])\s+", (text or "").strip())
-    chunks: List[str] = []
-    cur = ""
-    for sentence in sentences:
-        sentence = sentence.strip()
-        if not sentence:
-            continue
-        # A sentence longer than max_chars is broken into word-groups.
-        pieces: List[str] = []
-        if len(sentence) <= max_chars:
-            pieces = [sentence]
+def _wrap_lines(words: List[str], max_line: int = MAX_LINE_CHARS) -> List[str]:
+    """Word-wrap ``words`` into lines of ``<= max_line`` characters.
+
+    Breaks at word boundaries, preferring a break right after clause punctuation
+    once a line is about half full, and guarantees the final line holds more than
+    ``ORPHAN_WORDS`` words by pulling words back from the previous line."""
+    lines: List[str] = []
+    line = ""
+    for word in words:
+        if not line:
+            line = word
+        elif len(line) + 1 + len(word) > max_line:
+            lines.append(line)
+            line = word
         else:
-            buf = ""
-            for word in sentence.split():
-                if buf and len(buf) + 1 + len(word) > max_chars:
-                    pieces.append(buf)
-                    buf = word
-                else:
-                    buf = f"{buf} {word}".strip() if buf else word
-            if buf:
-                pieces.append(buf)
-        for piece in pieces:
-            if cur and len(cur) + 1 + len(piece) > max_chars:
-                chunks.append(cur)
-                cur = piece
-            else:
-                cur = f"{cur} {piece}".strip() if cur else piece
-    if cur:
-        chunks.append(cur)
-    return chunks
+            line = f"{line} {word}"
+            # Break after a clause boundary once the line is reasonably full.
+            if len(line) >= max_line // 2 and _CLAUSE_END.search(line):
+                lines.append(line)
+                line = ""
+    if line:
+        lines.append(line)
+
+    # Fix a too-short final line by pulling words from the previous line so the
+    # caption never ends on a one/two-word leftover.
+    while len(lines) > 1 and len(lines[-1].split()) <= ORPHAN_WORDS:
+        prev_words = lines[-2].split()
+        if len(prev_words) <= 1:
+            break
+        moved = prev_words[-1]
+        new_last = f"{moved} {lines[-1]}"
+        if len(new_last) > max_line:
+            break
+        lines[-2] = " ".join(prev_words[:-1])
+        lines[-1] = new_last
+    return lines
+
+
+def _split_captions(text: str) -> List[str]:
+    """Split narration prose into caption cues (at most two lines of at most
+    ``MAX_LINE_CHARS`` characters each), breaking at clause/word boundaries and
+    merging any orphan one/two-word tail into the previous line."""
+    words = [w for w in re.split(r"\s+", (text or "").strip()) if w]
+    lines = _wrap_lines(words)
+
+    cues: List[str] = []
+    i = 0
+    while i < len(lines):
+        if i + 1 < len(lines):
+            cues.append(f"{lines[i]}\n{lines[i + 1]}")
+            i += 2
+        else:
+            cues.append(lines[i])
+            i += 1
+    return cues
+
+
+def _reconcile_durations(durations: List[float], total: float) -> List[float]:
+    """Clamp each cue to ``[MIN_CUE_SECS, MAX_CUE_SECS]`` and nudge values so they
+    still sum to ``total`` (bounded passes; converges on realistic inputs)."""
+    lo, hi = MIN_CUE_SECS, MAX_CUE_SECS
+    ds = [max(lo, min(hi, d)) for d in durations]
+    for _ in range(64):
+        diff = total - sum(ds)
+        if abs(diff) < 1e-6:
+            break
+        if diff > 0:
+            movable = [i for i, d in enumerate(ds) if d < hi - 1e-9]
+        else:
+            movable = [i for i, d in enumerate(ds) if d > lo + 1e-9]
+        if not movable:
+            break
+        step = diff / len(movable)
+        for i in movable:
+            ds[i] = max(lo, min(hi, ds[i] + step))
+    return ds
 
 
 def _timed_chunks(start: float, duration: float, chunks: List[str]) -> List[Caption]:
     """Spread ``chunks`` across ``[start, start+duration]``, each sized by its
-    length (longer text -> more screen time), pinned so the last cue ends with
-    the clip."""
+    character count (longer text -> more screen time), floored at MIN_CUE_SECS and
+    capped at MAX_CUE_SECS, pinned so the last cue ends with the clip."""
     if not chunks:
         return []
-    total = sum(len(c) for c in chunks) or 1
     end = start + duration
+    lengths = [len(c.replace("\n", "")) for c in chunks]
+    total = sum(lengths) or 1
+    durations = _reconcile_durations(
+        [duration * n / total for n in lengths], duration
+    )
     out: List[Caption] = []
     t = start
-    for c in chunks[:-1]:
-        d = max(duration * len(c) / total, MIN_CUE_SECS)
-        s, e = t, min(t + d, end)
-        if e - s >= 0.4:
-            out.append((s, e, c))
-        t = e
-    out.append((t, end, chunks[-1]))
+    for text, d in zip(chunks, durations):
+        out.append((t, t + d, text))
+        t += d
+    # Pin the last cue to the clip end exactly (a no-op when durations already
+    # sum to the clip length, but guards against float drift and negative
+    # durations when a clip is shorter than MIN_CUE_SECS * len(chunks)).
+    if out:
+        s, _, text = out[-1]
+        out[-1] = (min(s, end), end, text)
     return out
 
 
