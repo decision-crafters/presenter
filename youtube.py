@@ -305,6 +305,67 @@ def _load_font(design, size: int):
     return ImageFont.load_default(size)
 
 
+# Math/arrow symbols the metadata prompt may emit that render as a tofu (empty)
+# box in fonts without those glyphs. Mapped to ASCII so thumbnails stay legible
+# on any font, including Pillow's limited bundled default on Linux.
+_THUMB_SYMBOL_ASCII = {
+    "\u2260": "!=",   # ≠
+    "\u2192": "->",   # →
+    "\u2190": "<-",   # ←
+    "\u2194": "<->",  # ↔
+    "\u21d2": "=>",   # ⇒
+    "\u21d0": "<=",   # ⇐
+    "\u2264": "<=",   # ≤
+    "\u2265": ">=",   # ≥
+    "\u00d7": "x",    # ×
+    "\u00f7": "/",    # ÷
+    "\u2014": "-",    # — em dash
+    "\u2013": "-",    # – en dash
+    "\u2212": "-",    # − minus
+    "\u2026": "...",  # …
+    "\u2022": "-",    # •
+    "\u00b7": "-",    # ·
+    "\u201c": '"',    # “
+    "\u201d": '"',    # ”
+    "\u2018": "'",    # ‘
+    "\u2019": "'",    # ’
+}
+
+
+def _font_has_glyph(font, ch: str) -> bool:
+    """True if ``font`` has a real glyph for ``ch`` (not the .notdef tofu box).
+
+    Renders U+FFFF (never mapped to a real glyph) as the reference; a character
+    whose rendered mask matches it is missing from the font."""
+    if not ch or ch == " ":
+        return True
+    try:
+        notdef = font.getmask("\uffff")
+        mask = font.getmask(ch)
+    except Exception:
+        return True  # can't tell; keep rather than over-prune
+    notdef_bbox = notdef.getbbox()
+    bbox = mask.getbbox()
+    if notdef_bbox is None:
+        return bbox is not None  # font renders nothing for unknown chars
+    return (bbox, mask.size) != (notdef_bbox, notdef.size)
+
+
+def _sanitize_thumbnail_text(text: str, font=None) -> str:
+    """Transliterate common symbols to ASCII and drop any glyph the font can't
+    render, so the thumbnail never shows a tofu (empty) box."""
+    text = (text or "").strip()
+    out = []
+    for ch in text:
+        if ch in _THUMB_SYMBOL_ASCII:
+            out.append(_THUMB_SYMBOL_ASCII[ch])
+        elif 0x20 <= ord(ch) <= 0x7E or (font is not None and _font_has_glyph(font, ch)):
+            out.append(ch)
+        else:
+            out.append(" ")  # unsupported symbol -> space (collapsed on split)
+    return "".join(out)
+
+
 def render_thumbnail(out_path: str, text: str, design, image_path: Optional[str]) -> str:
     """Brand thumbnail: ground color, image faded in from the right, stacked bold
     words (last word in the accent color), and the logo bug in one corner."""
@@ -341,6 +402,9 @@ def render_thumbnail(out_path: str, text: str, design, image_path: Optional[str]
 
     draw = ImageDraw.Draw(canvas)
     max_words = int(thumb.get("maxWords", 3))
+    # Sanitize before splitting: transliterate math/arrow symbols to ASCII and
+    # drop glyphs the chosen font can't render, so no tofu boxes appear.
+    text = _sanitize_thumbnail_text(text, _load_font(design, 190))
     words = re.sub(r"\s+", " ", text).strip().upper().split(" ")[:max_words]
 
     # Largest size where the widest word fits the text column and the stack fits vertically.
