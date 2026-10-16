@@ -6,6 +6,7 @@ Writes ``<presentation_dir>/youtube/``:
     description.txt  the full description, ready to paste
     thumbnail.jpg    1280x720, branded from the DESIGN.md ``thumbnail`` tokens
     index.html       a page with every field, character counts, and copy buttons
+    UPLOAD_PLAN.md   a filled upload checklist (docs/youtube-upload-plan.template.md)
 
 Chapters are *computed* from the rendered clips (``clips.txt`` + ffprobe), never
 guessed by the model, so timestamps always match the video. Only the wording
@@ -385,6 +386,27 @@ def render_page(out_path: str, meta: dict, description: str, chapters: List[dict
 
 # ---- orchestration ----
 
+_UPLOAD_PLAN_TEMPLATE = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "docs", "youtube-upload-plan.template.md",
+)
+
+
+def write_upload_plan(presentation_dir: str, meta: dict, chapters: List[dict]) -> str:
+    """Write a filled UPLOAD_PLAN.md into the deck's ``youtube/`` folder."""
+    with open(_UPLOAD_PLAN_TEMPLATE) as f:
+        text = f.read()
+    text = (
+        text.replace("{{title}}", (meta.get("title") or "").strip())
+        .replace("{{deck_dir}}", presentation_dir)
+        .replace("{{chapters_count}}", str(len(chapters)))
+    )
+    out = os.path.join(presentation_dir, "youtube", "UPLOAD_PLAN.md")
+    with open(out, "w") as f:
+        f.write(text)
+    return out
+
+
 def build_kit(presentation_dir: str, llm=None, design=None, steering: str = "",
               series=None, ep=None, source=None, force=False,
               thumbnail_text: Optional[str] = None) -> str:
@@ -435,6 +457,12 @@ def build_kit(presentation_dir: str, llm=None, design=None, steering: str = "",
     )
     page = os.path.join(out_dir, "index.html")
     render_page(page, meta, description, chapters)
+
+    try:
+        plan = write_upload_plan(presentation_dir, meta, chapters)
+        print(f"> Upload checklist written to {plan}")
+    except OSError as e:
+        print(f"! Could not write UPLOAD_PLAN.md: {e}")
 
     if len(meta["title"]) > TITLE_MAX:
         print(f"! Title is {len(meta['title'])} chars (> {TITLE_MAX}); it will truncate on mobile.")
