@@ -29,6 +29,7 @@ Options: --force (re-ask the model), --thumbnail-text "Three Words Max".
 """
 
 import argparse
+import glob
 import html
 import json
 import os
@@ -386,9 +387,16 @@ def _thumbnail_image(presentation_dir: str, design) -> Optional[str]:
         face = os.path.join(design.source_dir, face)
     if face and os.path.exists(face):
         return face
-    # Otherwise the opening slide still (the hook) -- "demo still" in the brand system.
-    still = os.path.join(presentation_dir, "presentation_1_1280x720.png")
-    return still if os.path.exists(still) else None
+    # Otherwise the opening slide still (the hook) -- "demo still" in the brand
+    # system. The video can render at any resolution, so glob for the first
+    # slide's screenshot rather than assuming a fixed size.
+    stills = glob.glob(os.path.join(presentation_dir, "presentation_1_*.png"))
+
+    def _width(p: str) -> int:
+        m = re.search(r"(\d+)x(\d+)\.png$", p)
+        return int(m.group(1)) if m else 0
+
+    return max(stills, key=_width) if stills else None
 
 
 # ---- page ----

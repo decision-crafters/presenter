@@ -15,6 +15,7 @@ from llama_index.core.workflow.retry_policy import ConstantDelayRetryPolicy
 
 from models import PresentationStructure, load_structure, structure_cache_path
 from agents.narrator import narrate
+from video_settings import DEFAULT_RESOLUTION
 
 
 # Playback speed for the narration in the exported video. 1.0 = Kokoro's
@@ -23,13 +24,14 @@ from agents.narrator import narrate
 # this same constant so audio and video stay in sync — change it in one place.
 NARRATION_TEMPO = 1.0
 
-# Demo clips must match the narrated slide clips exactly (1280x720, h264/yuv420p,
-# 25fps, aac 48k stereo) so the final `concat -c copy` can stitch them without a
-# re-encode.
-DEMO_CLIP_VF = (
-    "scale=1280:720:force_original_aspect_ratio=decrease,"
-    "pad=1280:720:(ow-iw)/2:(oh-ih)/2:color=black,format=yuv420p,fps=25"
-)
+
+def _demo_vf(width: int, height: int) -> str:
+    """Scale/pad a demo recording to the target frame so the final
+    `concat -c copy` can stitch it without a re-encode (h264/yuv420p, 25fps)."""
+    return (
+        f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
+        f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color=black,format=yuv420p,fps=25"
+    )
 
 
 def _media_duration(path: str) -> float:
@@ -47,8 +49,8 @@ def _media_duration(path: str) -> float:
         return 0.0
 
 
-def _build_demo_clip(media_path, caption_mp3, duration: float, out_file: str) -> bool:
-    """Render one demo recording as a 1280x720 clip matching the narrated clips.
+def _build_demo_clip(media_path, caption_mp3, duration: float, out_file: str, vf: str) -> bool:
+    """Render one demo recording as a clip matching the narrated clips.
     The demo animates (looped to fill ``duration``); audio is the spoken caption
     (padded with silence) or a silent stereo track. Returns True on success."""
     cmd = ["ffmpeg", "-y", "-stream_loop", "-1", "-i", media_path]
@@ -57,7 +59,7 @@ def _build_demo_clip(media_path, caption_mp3, duration: float, out_file: str) ->
     else:
         cmd += ["-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo"]
     cmd += [
-        "-t", f"{duration:.3f}", "-vf", DEMO_CLIP_VF,
+        "-t", f"{duration:.3f}", "-vf", vf,
         "-map", "0:v:0", "-map", "1:a:0",
         "-c:v", "libx264", "-pix_fmt", "yuv420p",
         "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2",
@@ -87,6 +89,7 @@ class PresenterVideoCreaterWorkflow(Workflow):
         voice: str,
         lang_code: str = "a",
         pronunciations: dict = None,
+        resolution: tuple = DEFAULT_RESOLUTION,
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
@@ -94,6 +97,9 @@ class PresenterVideoCreaterWorkflow(Workflow):
         self.lang_code = lang_code
         # Persona pronunciation lexicon applied to narration/captions before TTS.
         self.pronunciations = pronunciations or {}
+        # Target frame size; the deck's screenshots and demo clips are rendered
+        # to match so the final `concat -c copy` needs no re-encode.
+        self.width, self.height = resolution
 
     @step
     async def start(
@@ -142,7 +148,8 @@ class PresenterVideoCreaterWorkflow(Workflow):
         if os.path.exists(slide_clip_file):
             return SlideClipCreated(slide_index=slide_index, clip_file=slide_clip_file)
         slide_ss_file = os.path.join(
-            presentation_dir, f"presentation_{slide_index+1}_1280x720.png"
+            presentation_dir,
+            f"presentation_{slide_index+1}_{self.width}x{self.height}.png",
         )
         slide_audio_file = os.path.join(slide_dir, "narration.mp3")
         result = subprocess.run(
@@ -226,7 +233,10 @@ class PresenterVideoCreaterWorkflow(Workflow):
                     _media_duration(caption_mp3) if caption_mp3 else 0.0,
                     2.0,
                 )
-                if not _build_demo_clip(media_path, caption_mp3, duration, clip_file):
+                if not _build_demo_clip(
+                    media_path, caption_mp3, duration, clip_file,
+                    _demo_vf(self.width, self.height),
+                ):
                     continue
             rels.append(os.path.relpath(clip_file, presentation_dir))
         return rels
@@ -244,7 +254,9 @@ class PresenterVideoCreaterWorkflow(Workflow):
         except Exception:
             return None
         idx = closing.get("screenshot_index")
-        shot = os.path.join(presentation_dir, f"presentation_{idx}_1280x720.png")
+        shot = os.path.join(
+            presentation_dir, f"presentation_{idx}_{self.width}x{self.height}.png"
+        )
         if not idx or not os.path.exists(shot):
             print(f"\n> Closing CTA screenshot not found ({shot}); skipping.\n")
             return None
@@ -271,7 +283,10 @@ class PresenterVideoCreaterWorkflow(Workflow):
             duration = (
                 _media_duration(caption_mp3) if caption_mp3 else 0.0
             ) + hold_seconds
-            if not _build_demo_clip(shot, caption_mp3, duration, clip_file):
+            if not _build_demo_clip(
+                shot, caption_mp3, duration, clip_file,
+                _demo_vf(self.width, self.height),
+            ):
                 return None
         return os.path.relpath(clip_file, presentation_dir)
 

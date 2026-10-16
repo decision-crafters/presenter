@@ -562,11 +562,13 @@ class PresenterWorkflow(Workflow):
         )
 
         print("\n> Exporting presentation to PDF...\n")
+        width, height = video_settings(self.design).resolution
         decktape_result = subprocess.run(
             [
                 "decktape",
                 "--headless=true",
                 "--screenshots",
+                f"--screenshots-size={width}x{height}",
                 "--screenshots-directory=.",
                 "reveal",
                 html_file,
