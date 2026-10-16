@@ -1,4 +1,13 @@
-from youtube import build_description, youtube_settings, YouTubeSettings
+from PIL import Image, ImageFont
+
+from youtube import (
+    build_description,
+    youtube_settings,
+    YouTubeSettings,
+    _font_has_glyph,
+    _sanitize_thumbnail_text,
+    render_thumbnail,
+)
 
 
 def _meta():
@@ -70,3 +79,39 @@ def test_footer_and_links_ordering():
     assert desc.index("▶ Website: https://example.org") < desc.index("Subscribe for more:")
     assert desc.index("Subscribe for more:") < desc.index("Chapters")
     assert desc.index("— Footer") < desc.index("#AI #ML #Dev")
+
+
+def test_sanitize_transliterates_symbols():
+    assert _sanitize_thumbnail_text("A ≠ B") == "A != B"
+    assert _sanitize_thumbnail_text("Connected ≠ Authorized") == "Connected != Authorized"
+    assert _sanitize_thumbnail_text("A → B") == "A -> B"
+    assert _sanitize_thumbnail_text("≤ 3") == "<= 3"
+
+
+def test_sanitize_strips_unsupported_non_ascii():
+    # Without a font, any non-ASCII char not in the map is dropped to whitespace.
+    result = _sanitize_thumbnail_text("A 🔥 B")
+    assert "🔥" not in result
+    assert result.split() == ["A", "B"]
+
+
+def test_font_has_glyph_detects_tofu():
+    font = ImageFont.load_default(60)  # limited font: has ASCII, lacks ≠
+    assert _font_has_glyph(font, "A") is True
+    assert _font_has_glyph(font, "≠") is False
+
+
+def test_sanitized_text_has_no_missing_glyphs():
+    font = ImageFont.load_default(60)
+    text = _sanitize_thumbnail_text("Connected ≠ Authorized", font)
+    assert text == "Connected != Authorized"
+    for ch in text.replace(" ", ""):
+        assert _font_has_glyph(font, ch), ch
+
+
+def test_render_thumbnail_handles_symbol_text(tmp_path):
+    out = str(tmp_path / "thumbnail.jpg")
+    render_thumbnail(out, "Connected ≠ Authorized", None, None)
+    with Image.open(out) as im:
+        assert im.format == "JPEG"
+        assert im.size == (1280, 720)
