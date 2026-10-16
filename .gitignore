@@ -155,6 +155,11 @@ cython_debug/
 presentations/
 testing/
 
+# Private brand/persona files that must never be committed (see README
+# "Private brands": copy a template into .presenter-local/<brand>/ and run with
+# --design/--persona). The engine and neutral example brands stay public.
+/.presenter-local/
+
 # A personal brand file auto-applied to every deck; shared themes live in designs/
 /DESIGN.md
 

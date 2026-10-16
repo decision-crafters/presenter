@@ -300,21 +300,45 @@ async def main():
 
     # A stable, machine-readable line so any caller (agent or script) can locate
     # the outputs without parsing the human-readable log.
+    result = build_result(presentation_dir, args.export_video, args.youtube)
+    print("PRESENTER_RESULT " + json.dumps(result))
+
+
+def build_result(presentation_dir: str, export_video: bool, youtube: bool) -> dict:
+    """The stable PRESENTER_RESULT dict, derived from files on disk.
+
+    ``captions`` and ``youtube`` list the files that actually exist, so callers
+    can locate outputs without parsing the human-readable log. Kept as a plain
+    function so the paths can be unit-tested.
+    """
     mp4 = os.path.join(presentation_dir, "presentation.mp4")
     caption_files = {}
-    if args.export_video:
+    if export_video:
         for key, name in (("srt", "captions.srt"), ("vtt", "captions.vtt")):
             path = os.path.join(presentation_dir, name)
             if os.path.exists(path):
                 caption_files[key] = path
-    result = {
+    kit_files = {}
+    if youtube and export_video:
+        youtube_dir = os.path.join(presentation_dir, "youtube")
+        for key, name in (
+            ("metadata", "metadata.json"),
+            ("description", "description.txt"),
+            ("thumbnail", "thumbnail.jpg"),
+            ("page", "index.html"),
+            ("plan", "UPLOAD_PLAN.md"),
+        ):
+            path = os.path.join(youtube_dir, name)
+            if os.path.exists(path):
+                kit_files[key] = path
+    return {
         "presentation_dir": presentation_dir,
         "html": os.path.join(presentation_dir, "output", "index.html"),
         "pdf": os.path.join(presentation_dir, "presentation.pdf"),
-        "mp4": mp4 if (args.export_video and os.path.exists(mp4)) else None,
+        "mp4": mp4 if (export_video and os.path.exists(mp4)) else None,
         "captions": caption_files or None,
+        "youtube": kit_files or None,
     }
-    print("PRESENTER_RESULT " + json.dumps(result))
 
 
 if __name__ == "__main__":

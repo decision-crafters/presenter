@@ -62,6 +62,7 @@ The LLM is built in one place — `build_llm(provider, model)` in `providers.py`
 - **Visual**: `reveal_config_lines` picks the reveal base theme/`CODE_THEME` (prepended before `mdslides`), and `apply_branding` post-processes `output/index.html` — injecting a `<style>:root{--r-*}</style>` (brand colors → `--r-background/main/heading/link-color`, fonts → `--r-*-font` + Google-Fonts `<link>`s), an optional background image and logo `<div>`, and copying local assets. This runs in `combine_slides` **after `mdslides` and before `decktape`**, so the PDF inherits the theme.
 - **Voice**: the DESIGN.md Markdown body is merged (in `run.py`) with the `--guide` body into the single steering string fed to the prompts — no agent changes.
 - **Video settings**: a `video:` token block (`video_settings.py`) is the one shared home for MP4/export settings — `closingLine` (the spoken repo-deck outro) and `holdSeconds` (end-screen hold) are used today; #8 adds `resolution` and #10 adds watermark/`channel` here.
+- **YouTube upload settings**: a `youtube:` token block (`youtube.youtube_settings`) holds `category`, `language`, `descriptionFooter`, `links`, and an *optional* `subscribe` call-to-action (off by default so a brand's footer/link stays the sole CTA) — folded into the description and surfaced on the kit's `index.html`.
 
 mdslides itself has no custom-CSS hook, so branding is applied by HTML post-processing rather than by forking mdslides (a deliberate, documented choice). Example themes live in `designs/`.
 

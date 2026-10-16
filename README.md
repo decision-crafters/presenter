@@ -102,7 +102,7 @@ python run.py "observer design pattern" --design designs/midnight
 python run.py "observer design pattern" --design designs/sunrise
 ```
 
-  Recognized DESIGN.md keys (all optional): `theme` (a reveal base theme: white/black/league/beige/sky/night/serif/simple/solarized/moon/blood), `codeTheme`, `colors` (`background`, `text`|`foreground`, `heading`|`primary`, `accent`|`link`), `typography.heading.fontFamily` / `typography.body.fontFamily` / `typography.body.fontSize`, `fontImports` (a list of Google-Fonts/CSS URLs), `background.image`, `logo` (+ `logoPosition`), `diagramMaxHeight` (cap for diagram images, default `460px`). The Markdown body (Overview / Voice / Do's & Don'ts) steers the wording.
+  Recognized DESIGN.md keys (all optional): `theme` (a reveal base theme: white/black/league/beige/sky/night/serif/simple/solarized/moon/blood), `codeTheme`, `colors` (`background`, `text`|`foreground`, `heading`|`primary`, `accent`|`link`), `typography.heading.fontFamily` / `typography.body.fontFamily` / `typography.body.fontSize`, `fontImports` (a list of Google-Fonts/CSS URLs), `background.image`, `logo` (+ `logoPosition`), `diagramMaxHeight` (cap for diagram images, default `460px`), a `video:` block (`closingLine`, `holdSeconds`), and a `youtube:` block (`category`, `language`, `descriptionFooter`, `links`, optional `subscribe`). The Markdown body (Overview / Voice / Do's & Don'ts) steers the wording.
 
 Two rendering niceties apply automatically: a **tall Mermaid diagram is moved onto its own slide** so it isn't cut off (disabled under `--export-video`, which needs one slide per narration), and when a deck is built from `--source`, a **References** slide is appended citing the source repo/file and any reference URLs found in it.
 
@@ -129,6 +129,21 @@ python run.py "the history of coffee" --images pexels         # real photos, nee
 python run.py "kubernetes operators" --persona personas/devops-engineer --export-video
 python run.py --source <repo> --persona auto --export-video
 ```
+
+- Keep a **private brand** (colors, fonts, closing line, channel footer, persona) out of the public repo by putting it in a gitignored `.presenter-local/<brand>/` folder. Copy the neutral example as a starting point, customize it, and point `--design` / `--persona` at the folder:
+
+```bash
+mkdir -p .presenter-local/my-brand
+cp designs/youtube-example/DESIGN.md .presenter-local/my-brand/DESIGN.md
+# edit colors/fonts, the `video:` closing line, and the `youtube:` block (footer,
+# links, optional `subscribe`); add a persona the same way:
+cp personas/technical-educator/PERSONA.md .presenter-local/my-brand/PERSONA.md
+
+python run.py "my topic" --design .presenter-local/my-brand \
+    --persona .presenter-local/my-brand --export-video
+```
+
+  `.presenter-local/` is gitignored, so those files never ship. The engine and the neutral example brands stay public; only your brand's specifics live locally.
 
 - Add `--export-video` argument to generate a full video of the presentation with voiceover (pick a Kokoro voice with `--voice`, or let a `--persona` set it).
 
