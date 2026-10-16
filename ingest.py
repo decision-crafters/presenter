@@ -19,6 +19,7 @@ import shutil
 import subprocess
 import tempfile
 from typing import TYPE_CHECKING, List, Optional
+from urllib.parse import urlparse, urlunparse
 
 if TYPE_CHECKING:
     from llama_index.core import Document
@@ -201,25 +202,82 @@ def _collect_files(root: str, focus: Optional[List[str]] = None) -> List[str]:
 
 _URL_RE = re.compile(r"""https?://[^\s)\]}"'>]+""")
 
-
-def extract_reference_urls(docs, limit: int = 8) -> List[str]:
-    """Collect up to ``limit`` unique http(s) URLs from the ingested documents."""
-    seen, out = set(), []
-    for d in docs:
-        for raw in _URL_RE.findall(getattr(d, "text", "") or ""):
-            url = raw.rstrip(".,;:")
-            if url not in seen:
-                seen.add(url)
-                out.append(url)
-                if len(out) >= limit:
-                    return out
-    return out
-
-
 _SOURCES_HEADING_RE = re.compile(
     r"^#{1,6}\s*(?:\d+[.)]\s*)?(?:sources(?:\s+consulted)?|references|bibliography|works\s+cited|citations)\b",
     re.IGNORECASE,
 )
+
+# Hosts (and their subdomains) that are image credits or tracking, not sources.
+_IMAGE_HOSTS = ("unsplash.com", "pexels.com", "pixabay.com", "gravatar.com")
+
+# Extensions that mark an inline image asset rather than a source to cite.
+_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".avif",
+               ".bmp", ".ico", ".tiff"}
+
+
+def _url_host(url: str) -> str:
+    return (urlparse(url).hostname or "").lower()
+
+
+def _url_ext(url: str) -> str:
+    """Lowercase extension of a URL path, ignoring any ``?query``/``#fragment``."""
+    path = re.split(r"[?#]", url, 1)[0]
+    return os.path.splitext(path)[1].lower()
+
+
+def _strip_utm(url: str) -> str:
+    """Drop ``utm_*`` tracking parameters from a URL."""
+    parsed = urlparse(url)
+    if not parsed.query:
+        return url
+    query = "&".join(p for p in parsed.query.split("&")
+                     if not p.lower().startswith("utm_"))
+    return urlunparse(parsed._replace(query=query))
+
+
+def _is_asset_or_tracking(url: str) -> bool:
+    """True if ``url`` is an image credit/tracking link, not a cited source."""
+    host = _url_host(url)
+    if any(host == h or host.endswith("." + h) for h in _IMAGE_HOSTS):
+        return True
+    if "utm_campaign=api-credit" in url.lower():
+        return True
+    if _url_ext(url) in _IMAGE_EXTS:
+        return True
+    return False
+
+
+def extract_reference_urls(docs, limit: int = 8) -> List[str]:
+    """Collect up to ``limit`` unique http(s) URLs from the ingested documents.
+
+    Skips image-credit/tracking links (Unsplash/Pexels/Pixabay/Gravatar, any
+    ``utm_campaign=api-credit``, and image files), strips ``utm_*`` params, and
+    prefers URLs listed under a "Sources"/"References" heading over those found
+    elsewhere in the text."""
+    preferred: List[str] = []
+    other: List[str] = []
+    seen: set = set()
+
+    def add(url: str, in_section: bool) -> None:
+        url = _strip_utm(url.rstrip(".,;:"))
+        if not url or url in seen or _is_asset_or_tracking(url):
+            return
+        seen.add(url)
+        (preferred if in_section else other).append(url)
+
+    for d in docs:
+        in_section = False
+        for line in (getattr(d, "text", "") or "").splitlines():
+            if line.lstrip().startswith("#"):
+                in_section = bool(_SOURCES_HEADING_RE.match(line.strip()))
+                continue
+            for raw in _URL_RE.findall(line):
+                add(raw, in_section)
+                if len(preferred) >= limit:
+                    return preferred[:limit]
+    return (preferred + other)[:limit]
+
+
 _BULLET_RE = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+(.*\S)")
 
 
