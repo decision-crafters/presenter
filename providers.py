@@ -43,6 +43,14 @@ def resolve_model(provider: str, model: Optional[str]) -> str:
     return model or os.getenv("LLM_MODEL") or DEFAULT_MODELS.get(provider, "")
 
 
+def force_tool_required() -> bool:
+    """Whether to force ``tool_required=True`` (``tool_choice="required"``) for
+    structured output. Default on; set ``PRESENTER_TOOL_REQUIRED=0`` to opt out."""
+    return os.getenv("PRESENTER_TOOL_REQUIRED", "1").strip().lower() not in (
+        "0", "false", "no", "off",
+    )
+
+
 def build_llm(provider: Optional[str] = None, model: Optional[str] = None) -> LLM:
     """Construct the LLM for the given provider.
 
@@ -74,7 +82,25 @@ def build_llm(provider: Optional[str] = None, model: Optional[str] = None) -> LL
         base_url = os.getenv("OLLAMA_CLOUD_BASE_URL", OLLAMA_CLOUD_BASE_URL)
         # is_function_calling_model=True lets llama-index route structured_predict
         # through tool-calling instead of loose prompt-based JSON extraction.
-        return OpenAILike(
+        #
+        # Force tool_required=True (tool_choice="required") for structured
+        # output. With tool_choice="auto", some cloud models (muse-spark-open)
+        # write the tool call as plain text instead of a real tool call, which
+        # llama-index rejects as "0 tool calls".
+        if force_tool_required():
+            class _ToolRequiredOpenAILike(OpenAILike):
+                def _prepare_chat_with_tools(
+                    self, *args, tool_required: bool = False, **kwargs
+                ):
+                    return super()._prepare_chat_with_tools(
+                        *args, tool_required=True, **kwargs
+                    )
+
+            llm_cls = _ToolRequiredOpenAILike
+        else:
+            llm_cls = OpenAILike
+
+        return llm_cls(
             model=model,
             api_base=base_url,
             api_key=api_key,
