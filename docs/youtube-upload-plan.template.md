@@ -23,6 +23,11 @@
 - [ ] Description, tags, hashtags, and pinned comment are accurate.
 - [ ] Chapters are correct (≥3 chapters of ≥10 s).
 
+## Advisories
+Best-practice checks that failed for this video, each with a reason and source link:
+
+{{advisories}}
+
 ## Decide
 - [ ] Thumbnail: keep `youtube/thumbnail.jpg`, or supply a custom image.
 - [ ] Description links: add a repo/website/LinkedIn beyond the auto "▶ Code" line.
@@ -40,3 +45,8 @@
 - [ ] Hook is visible above the fold.
 - [ ] Chapters appear on the timeline.
 - [ ] Thumbnail and metadata match what the video actually delivers.
+
+## Sources
+Official/industry/community sources cited by this run's advisories:
+
+{{sources}}

@@ -37,7 +37,20 @@ import re
 import subprocess
 from dataclasses import dataclass, field
 
+from advisories import (
+    apply_overrides,
+    content_settings,
+    load_rules,
+    resolve_content_type,
+    resolve_rights,
+    sources_html,
+    sources_markdown,
+    sources_plain,
+)
+from advisories.engine import advise as evaluate_advisories
+from advisories.engine import build_facts
 from models import load_structure
+from video_settings import video_settings
 
 TITLE_MAX = 60
 HOOK_MAX = 150
@@ -515,6 +528,12 @@ h2{font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--mute
 .val{white-space:pre-wrap;word-break:break-word}.count{font-weight:600}.ok{color:var(--ok)}.warn{color:var(--warn)}
 button{font:inherit;font-size:12px;font-weight:600;border:0;border-radius:6px;padding:4px 10px;background:var(--btn);color:var(--btnt);cursor:pointer}
 img{width:100%;height:auto;border-radius:8px;display:block}ul{margin:0;padding-left:18px}.alt{color:var(--muted)}
+.advs{list-style:none;padding:0;margin:0}.adv{padding:10px 0;border-top:1px solid var(--line)}.adv:first-child{border-top:0}
+.adv .badge{font-size:11px;font-weight:600;padding:1px 8px;border-radius:99px;color:#fff;vertical-align:middle}
+.badge.official{background:#1a7f37}.badge.industry{background:#1f6feb}.badge.community{background:#8250df}
+.sev{font-size:11px;font-weight:700;text-transform:uppercase;margin-left:6px;vertical-align:middle}
+.sev.warn{color:var(--warn)}.sev.error{color:#c62828}.sev.info{color:var(--muted)}
+.adv .why,.adv .src{color:var(--muted);font-size:13px;margin-top:2px}.adv a{word-break:break-all}
 """
 
 
@@ -523,7 +542,8 @@ def _count(n: int, limit: int) -> str:
     return f'<span class="count {cls}">{n}/{limit}</span>'
 
 
-def render_page(out_path: str, meta: dict, description: str, chapters: list[dict]) -> None:
+def render_page(out_path: str, meta: dict, description: str, chapters: list[dict],
+                advisories: list | None = None) -> None:
     esc = html.escape
     tags_line = ", ".join(meta["tags"])
     fields = [
@@ -561,6 +581,14 @@ def render_page(out_path: str, meta: dict, description: str, chapters: list[dict
             )
             + "</section>"
         )
+    if advisories:
+        blocks.append(
+            "<section><h2>Advisories</h2><ul class='advs'>"
+            + "".join(a.to_html() for a in advisories)
+            + "</ul><h2>Sources</h2><ul>"
+            + sources_html(advisories)
+            + "</ul></section>"
+        )
     page = (
         "<!doctype html><html lang='en'><head><meta charset='utf-8'>"
         "<meta name='viewport' content='width=device-width,initial-scale=1'>"
@@ -585,14 +613,18 @@ _UPLOAD_PLAN_TEMPLATE = os.path.join(
 )
 
 
-def write_upload_plan(presentation_dir: str, meta: dict, chapters: list[dict]) -> str:
+def write_upload_plan(presentation_dir: str, meta: dict, chapters: list[dict],
+                      advisories: list | None = None) -> str:
     """Write a filled UPLOAD_PLAN.md into the deck's ``youtube/`` folder."""
     with open(_UPLOAD_PLAN_TEMPLATE) as f:
         text = f.read()
+    advisories_md = "\n".join(a.to_markdown() for a in advisories) if advisories else "None."
     text = (
         text.replace("{{title}}", (meta.get("title") or "").strip())
         .replace("{{deck_dir}}", presentation_dir)
         .replace("{{chapters_count}}", str(len(chapters)))
+        .replace("{{advisories}}", advisories_md)
+        .replace("{{sources}}", sources_markdown(advisories) if advisories else "")
     )
     out = os.path.join(presentation_dir, "youtube", "UPLOAD_PLAN.md")
     with open(out, "w") as f:
@@ -602,15 +634,14 @@ def write_upload_plan(presentation_dir: str, meta: dict, chapters: list[dict]) -
 
 def build_kit(presentation_dir: str, llm=None, design=None, steering: str = "",
               series=None, ep=None, source=None, force=False,
-              thumbnail_text: str | None = None) -> str:
+              thumbnail_text: str | None = None,
+              content_type: str | None = None) -> str:
     out_dir = os.path.join(presentation_dir, "youtube")
     os.makedirs(out_dir, exist_ok=True)
     meta_file = os.path.join(out_dir, "metadata.json")
     yt = youtube_settings(design)
 
     chapters = compute_chapters(presentation_dir)
-    if len(chapters) < 3:
-        print("! Fewer than 3 chapters of 10 s+; YouTube will not show chapters for this video.")
 
     if os.path.exists(meta_file) and not force:
         with open(meta_file) as f:
@@ -645,6 +676,14 @@ def build_kit(presentation_dir: str, llm=None, design=None, steering: str = "",
     if ch.name or ch.handle or ch.url:
         meta["channel"] = {"name": ch.name, "handle": ch.handle, "url": ch.url}
 
+    # ---- best-practice advisories (never block the kit) ----
+    resolved_type, rights, advisories = _advisories(
+        presentation_dir, meta, chapters, design, content_type
+    )
+    meta["content_type"] = resolved_type
+    meta["rights"] = rights
+    meta["advisories"] = [a.to_dict() for a in advisories]
+
     with open(meta_file, "w") as f:
         json.dump(meta, f, indent=2, ensure_ascii=False)
     with open(os.path.join(out_dir, "description.txt"), "w") as f:
@@ -656,20 +695,55 @@ def build_kit(presentation_dir: str, llm=None, design=None, steering: str = "",
         _thumbnail_image(presentation_dir, design),
     )
     page = os.path.join(out_dir, "index.html")
-    render_page(page, meta, description, chapters)
+    render_page(page, meta, description, chapters, advisories)
 
     try:
-        plan = write_upload_plan(presentation_dir, meta, chapters)
+        plan = write_upload_plan(presentation_dir, meta, chapters, advisories)
         print(f"> Upload checklist written to {plan}")
     except OSError as e:
         print(f"! Could not write UPLOAD_PLAN.md: {e}")
 
-    if len(meta["title"]) > TITLE_MAX:
-        print(f"! Title is {len(meta['title'])} chars (> {TITLE_MAX}); it will truncate on mobile.")
-    if len(meta["hook"]) > HOOK_MAX:
-        print(f"! Hook is {len(meta['hook'])} chars (> {HOOK_MAX}); it will be cut above the fold.")
+    _print_advisories(advisories)
     print(f"> YouTube kit written to {out_dir}/ (open {page})")
     return page
+
+
+def _advisories(presentation_dir: str, meta: dict, chapters: list[dict], design,
+                content_type: str | None) -> tuple[str, str, list]:
+    """Evaluate advisory rules for a rendered deck. Best-effort and never raises."""
+    resolved = resolve_content_type(content_type, design)
+    rights = resolve_rights(design)
+    content = content_settings(design)
+    try:
+        hold = video_settings(design).hold_seconds
+    except Exception:
+        hold = None
+    try:
+        rules = apply_overrides(load_rules(), design)
+        facts = build_facts(
+            presentation_dir,
+            meta=meta,
+            chapters=chapters,
+            content_type=resolved,
+            rights=rights,
+            content=content,
+            outro_hold_seconds=hold,
+        )
+        advisories = evaluate_advisories(facts, rules)
+    except Exception as e:
+        print(f"! Advisory rules could not be evaluated ({e}); continuing.")
+        advisories = []
+    return resolved, rights, advisories
+
+
+def _print_advisories(advisories: list) -> None:
+    if not advisories:
+        return
+    for adv in advisories:
+        print(adv.to_plain())
+    print("\nSources:")
+    print(sources_plain(advisories))
+    print()
 
 
 def main(argv=None) -> None:
@@ -689,6 +763,9 @@ def main(argv=None) -> None:
     p.add_argument("--model", default=None)
     p.add_argument("--force", action="store_true", help="Regenerate the wording with the model")
     p.add_argument("--thumbnail-text", default=None, help="Override the thumbnail words (max 3)")
+    p.add_argument("--content-type", default=None,
+                   help="Content type for advisories: explainer (default) | tutorial | "
+                        "course | documentary | book_summary | audiobook | short")
     p.add_argument("--open", action="store_true")
     args = p.parse_args(argv)
 
@@ -719,7 +796,8 @@ def main(argv=None) -> None:
 
         llm = build_llm(args.provider, args.model)
     page = build_kit(args.presentation_dir, llm, design, steering, series, ep, source,
-                     force=args.force, thumbnail_text=args.thumbnail_text)
+                     force=args.force, thumbnail_text=args.thumbnail_text,
+                     content_type=args.content_type)
     if args.open:
         subprocess.run(["open", page])
 
