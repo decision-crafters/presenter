@@ -104,6 +104,27 @@ def youtube_settings(design) -> YouTubeSettings:
     )
 
 
+@dataclass
+class ChannelSettings:
+    """Brand channel keys from the DESIGN.md ``channel:`` block (issue #10)."""
+    name: str = ""
+    handle: str = ""
+    url: str = ""
+
+
+def channel_settings(design) -> ChannelSettings:
+    """Read the brand's ``channel:`` tokens into a ChannelSettings. Empty-safe."""
+    tokens = getattr(design, "tokens", None) or {}
+    ch = tokens.get("channel") if isinstance(tokens, dict) else None
+    if not isinstance(ch, dict):
+        ch = {}
+    return ChannelSettings(
+        name=(ch.get("name") or "").strip(),
+        handle=(ch.get("handle") or "").strip(),
+        url=(ch.get("url") or "").strip(),
+    )
+
+
 # ---- chapters (computed from the rendered clips) ----
 
 def _duration(path: str) -> float:
@@ -617,6 +638,9 @@ def build_kit(presentation_dir: str, llm=None, design=None, steering: str = "",
     meta["category"] = yt.category
     meta["language"] = yt.language
     meta["subscribe"] = yt.subscribe
+    ch = channel_settings(design)
+    if ch.name or ch.handle or ch.url:
+        meta["channel"] = {"name": ch.name, "handle": ch.handle, "url": ch.url}
 
     with open(meta_file, "w") as f:
         json.dump(meta, f, indent=2, ensure_ascii=False)

@@ -8,12 +8,16 @@ repo-deck outro), the end-screen hold, and the video resolution live here; #10
       closingLine: "The repo is linked below. Clone it and run it."
       holdSeconds: 4
       resolution: 1080p        # 480p | 720p | 1080p | 1440p | 2160p | WxH
-      # watermark: ...         # issue #10
+      watermark:               # corner bug overlaid on the exported video (#10)
+        image: logo.png        # optional; defaults to the design's `logo`
+        position: bottom-right # top-left | top-right | bottom-left | bottom-right
+        height: 64             # px at 1080p, scaled to the render resolution
 """
 
+import os
 import re
 from dataclasses import dataclass
-from typing import Tuple
+from typing import Optional, Tuple
 
 DEFAULT_HOLD_SECONDS = 4.0
 
@@ -71,6 +75,38 @@ class VideoSettings:
     closing_line: str = DEFAULT_CLOSING_LINE
     hold_seconds: float = DEFAULT_HOLD_SECONDS
     resolution: Tuple[int, int] = DEFAULT_RESOLUTION
+    watermark: Optional["WatermarkSettings"] = None
+
+
+@dataclass
+class WatermarkSettings:
+    """A corner bug overlaid on the exported video (issue #10).
+
+    ``image`` is a resolved local path (or a URL, which the renderer skips — it
+    only overlays local files). ``height`` is in pixels at the 1080p reference
+    and scales with the render resolution.
+    """
+    image: Optional[str] = None
+    position: str = "bottom-right"
+    height: int = 64
+
+
+# ffmpeg ``overlay`` expressions for each corner, in the filter_complex
+# coordinate space (W/H = main video, w/h = the scaled watermark).
+_WATERMARK_POSITIONS = {
+    "top-left": "24:24",
+    "top-right": "W-w-24:24",
+    "bottom-left": "24:H-h-24",
+    "bottom-right": "W-w-24:H-h-24",
+}
+
+
+def watermark_filter(watermark: WatermarkSettings, video_height: int) -> str:
+    """The ffmpeg ``-filter_complex`` that scales the bug and overlays it in its
+    corner. ``video_height`` is the render height (e.g. 1080)."""
+    h = max(16, round(watermark.height * video_height / 1080))
+    pos = _WATERMARK_POSITIONS.get(watermark.position, _WATERMARK_POSITIONS["bottom-right"])
+    return f"[1:v]scale=-1:{h}[wm];[0:v][wm]overlay={pos}"
 
 
 def video_settings(design) -> VideoSettings:
@@ -85,8 +121,40 @@ def video_settings(design) -> VideoSettings:
         hold = float(hold)
     except (TypeError, ValueError):
         hold = DEFAULT_HOLD_SECONDS
+
+    watermark = _resolve_watermark(design, v.get("watermark"))
     return VideoSettings(
         closing_line=closing or DEFAULT_CLOSING_LINE,
         hold_seconds=max(0.0, hold),
         resolution=parse_resolution(v.get("resolution")),
+        watermark=watermark,
+    )
+
+
+def _resolve_watermark(design, raw) -> Optional[WatermarkSettings]:
+    """Build a WatermarkSettings from ``video.watermark`` (or None when disabled).
+
+    The bug image defaults to the design's ``logo`` token (the same asset used on
+    the slides and thumbnail), resolved relative to the DESIGN.md directory.
+    """
+    if raw is None or raw is False:
+        return None
+    cfg = raw if isinstance(raw, dict) else {}
+    if cfg.get("enabled") is False:
+        return None
+    tokens = getattr(design, "tokens", None) or {}
+    image = cfg.get("image") or (tokens.get("logo") if isinstance(tokens, dict) else None)
+    if image and not str(image).startswith(("http://", "https://", "data:")):
+        src = image
+        if not os.path.isabs(src) and getattr(design, "source_dir", None):
+            src = os.path.join(design.source_dir, src)
+        image = src
+    try:
+        height = int(cfg.get("height", 64))
+    except (TypeError, ValueError):
+        height = 64
+    return WatermarkSettings(
+        image=str(image) if image else None,
+        position=str(cfg.get("position", "bottom-right")),
+        height=height,
     )
