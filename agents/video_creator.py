@@ -15,7 +15,12 @@ from llama_index.core.workflow.retry_policy import ConstantDelayRetryPolicy
 
 from models import PresentationStructure, load_structure, structure_cache_path
 from agents.narrator import narrate
-from video_settings import DEFAULT_RESOLUTION, WatermarkSettings, watermark_filter
+from video_settings import (
+    DEFAULT_RESOLUTION,
+    WatermarkSettings,
+    watermark_filter,
+    watermark_issue,
+)
 
 
 # Playback speed for the narration in the exported video. 1.0 = Kokoro's
@@ -23,6 +28,12 @@ from video_settings import DEFAULT_RESOLUTION, WatermarkSettings, watermark_filt
 # default, which sounded rushed). The per-slide clip duration is derived from
 # this same constant so audio and video stay in sync — change it in one place.
 NARRATION_TEMPO = 1.0
+
+# Watermark re-encode settings. The overlay has to re-encode the already-h264
+# video, so we pin a low CRF (near-transparent second generation) instead of
+# ffmpeg's default CRF 23. Tune here to trade quality against encode time.
+WATERMARK_CRF = "18"
+WATERMARK_PRESET = "medium"
 
 
 def _demo_vf(width: int, height: int) -> str:
@@ -336,14 +347,15 @@ class PresenterVideoCreaterWorkflow(Workflow):
     def _apply_watermark(self, video_file: str) -> bool:
         """Overlay the configured corner bug onto ``video_file`` in place.
 
-        A no-op when no watermark is configured or its image can't be read (e.g.
-        a remote URL, which the renderer doesn't fetch). Returns True on success.
+        A no-op when no watermark is configured; warns and skips when the
+        configured image is missing, remote, or unsupported. Returns True on
+        success.
         """
-        if (
-            not self.watermark
-            or not self.watermark.image
-            or not os.path.exists(self.watermark.image)
-        ):
+        issue = watermark_issue(self.watermark)
+        if issue is not None:
+            print(f"\n! Watermark skipped: {issue}\n")
+            return False
+        if not self.watermark or not self.watermark.image:
             return False
         filt = watermark_filter(self.watermark, self.height)
         tmp = video_file + ".wm.mp4"
@@ -351,6 +363,7 @@ class PresenterVideoCreaterWorkflow(Workflow):
             [
                 "ffmpeg", "-y", "-i", video_file, "-i", self.watermark.image,
                 "-filter_complex", filt, "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                "-crf", WATERMARK_CRF, "-preset", WATERMARK_PRESET,
                 "-c:a", "copy", tmp,
             ],
             stdout=subprocess.PIPE,
