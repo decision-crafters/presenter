@@ -23,6 +23,7 @@ from models import (
     StructureFeedback,
     Slide,
     SlideInfo,
+    enforce_slide_count,
     load_structure,
     save_structure,
     structure_cache_path,
@@ -154,6 +155,7 @@ class PresenterWorkflow(Workflow):
         *args: Any,
         llm: LLM,
         target_slides: int = 15,
+        strict_slides: bool = False,
         guide: str = "",
         design: Optional[Design] = None,
         split_diagrams: bool = True,
@@ -166,6 +168,7 @@ class PresenterWorkflow(Workflow):
         super().__init__(*args, **kwargs)
         self.llm = llm
         self.target_slides = target_slides
+        self.strict_slides = strict_slides
         self.guide = guide
         self.design = design
         self.split_diagrams = split_diagrams
@@ -213,7 +216,8 @@ class PresenterWorkflow(Workflow):
                 return StructureFinalized(structure=structure)
 
         structure_with_title = create_presentation_structure_from_data(
-            documents, self.llm, self.target_slides, self.guide
+            documents, self.llm, self.target_slides, self.guide,
+            strict=self.strict_slides,
         )
         topic = self.title or structure_with_title.title
         await ctx.store.set("topic", topic)
@@ -251,7 +255,8 @@ class PresenterWorkflow(Workflow):
     ) -> ValidateStructureRequestReceived:
         topic = ev.topic
         initial_structure = create_presentation_structure(
-            topic, self.llm, self.target_slides, self.guide
+            topic, self.llm, self.target_slides, self.guide,
+            strict=self.strict_slides,
         )
         return ValidateStructureRequestReceived(structure=initial_structure)
 
@@ -285,6 +290,14 @@ class PresenterWorkflow(Workflow):
         self, ctx: Context, ev: StructureFinalized
     ) -> ComposeSlideRequestReceived:
         structure = ev.structure
+        if self.strict_slides:
+            structure = enforce_slide_count(structure, self.target_slides)
+            save_structure(await ctx.store.get("presentation_folder"), structure)
+        print(
+            f"\n> Slides: requested {self.target_slides}, got {len(structure.slides)}"
+            + (" (strict)" if self.strict_slides else "")
+            + "\n"
+        )
         await ctx.store.set("structure", structure)
         await ctx.store.set("num_slides", len(structure.slides))
         for slide_index, slide in enumerate(structure.slides):

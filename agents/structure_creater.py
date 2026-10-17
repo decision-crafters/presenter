@@ -2,7 +2,7 @@ from llama_index.core.llms.llm import LLM
 from llama_index.core.prompts.base import PromptTemplate
 
 
-from models import PresentationStructure
+from models import PresentationStructure, make_structure_model
 from guide import format_steering
 
 PRESENTATION_STRUCTURE_PROMPT = """
@@ -32,12 +32,12 @@ Aim for approximately {target_slides} slides by default (about 15 minutes of nar
 
 
 def create_presentation_structure(
-    topic: str, llm: LLM, target_slides: int = 15, guide: str = ""
+    topic: str, llm: LLM, target_slides: int = 15, guide: str = "", strict: bool = False
 ) -> PresentationStructure:
     print("\n> Creating presentation structure...\n")
     prompt = PromptTemplate(PRESENTATION_STRUCTURE_PROMPT)
     return llm.structured_predict(
-        PresentationStructure,
+        make_structure_model(False, target_slides if strict else None),
         prompt=prompt,
         topic=topic,
         target_slides=target_slides,
