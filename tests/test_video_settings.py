@@ -102,9 +102,10 @@ def test_watermark_enabled_flag():
 
 
 def test_watermark_issue(tmp_path):
-    # Not configured -> no warning.
+    # Not configured at all -> no warning.
     assert watermark_issue(None) is None
-    assert watermark_issue(WatermarkSettings(image=None)) is None
+    # Configured but no image -> a warning (previously a silent no-op).
+    assert watermark_issue(WatermarkSettings(image=None)) is not None
     # A valid local PNG -> no warning.
     png = tmp_path / "logo.png"
     png.write_bytes(b"x")
