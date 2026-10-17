@@ -165,11 +165,15 @@ def _resolve_watermark(design, raw) -> Optional[WatermarkSettings]:
 def watermark_issue(watermark: Optional[WatermarkSettings]) -> Optional[str]:
     """Why a *configured* watermark can't be overlaid, or None.
 
-    Returns None both for "no watermark configured" (nothing to warn about) and
-    for a usable watermark; a configured-but-unusable image yields a message.
+    ``None`` means "nothing to warn about": either no watermark was configured at
+    all (``watermark is None``) or the image is usable. A configured watermark
+    with a missing, remote, or unsupported image (or no image at all) yields a
+    message.
     """
-    if not watermark or not watermark.image:
+    if watermark is None:
         return None
+    if not watermark.image:
+        return "no watermark image configured (set `image` or add a `logo`)"
     img = watermark.image
     if img.lower().startswith(("http://", "https://", "data:")):
         return "remote image URLs aren't fetched; use a local PNG"
