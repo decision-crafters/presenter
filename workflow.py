@@ -527,18 +527,21 @@ class PresenterWorkflow(Workflow):
                     "and draw your own conclusions."
                 )
                 hold_seconds = 4.0
+                closing_title = "Sources"
             else:
                 # Repo decks close on the brand's own closing line + an end-screen
                 # hold (the shared `video:` settings block).
                 settings = video_settings(self.design)
                 narration = settings.closing_line
                 hold_seconds = settings.hold_seconds
+                closing_title = "Get the Code"
             with open(closing_file, "w") as f:
                 json.dump(
                     {
                         "screenshot_index": cta_index,
                         "narration": narration,
                         "hold_seconds": hold_seconds,
+                        "title": closing_title,
                     },
                     f,
                     indent=2,

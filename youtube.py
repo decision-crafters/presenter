@@ -125,7 +125,8 @@ def _slide_titles(presentation_dir: str) -> List[str]:
     return [s.title for s in structure.slides]
 
 
-def _clip_label(rel: str, titles: List[str], demos: List[dict]) -> str:
+def _clip_label(rel: str, titles: List[str], demos: List[dict],
+                closing_title: str = "Get the Code") -> str:
     m = re.match(r"slide_(\d+)/clip\.mp4$", rel)
     if m and int(m.group(1)) < len(titles):
         return titles[int(m.group(1))]
@@ -135,7 +136,7 @@ def _clip_label(rel: str, titles: List[str], demos: List[dict]) -> str:
         name = demos[idx].get("title") if idx < len(demos) else None
         return f"Demo: {name}" if name else "Demo"
     if rel.startswith("closing"):
-        return "Get the Code"
+        return closing_title
     return os.path.splitext(os.path.basename(rel))[0]
 
 
@@ -157,6 +158,16 @@ def compute_chapters(presentation_dir: str) -> List[dict]:
     if os.path.exists(demos_file):
         with open(demos_file) as f:
             demos = json.load(f) or []
+    # The closing clip is a repo CTA ("Get the Code") or, for a document deck,
+    # its cited Sources; closing.json records which so the chapter matches.
+    closing_title = "Get the Code"
+    closing_file = os.path.join(presentation_dir, "closing.json")
+    if os.path.exists(closing_file):
+        try:
+            with open(closing_file) as f:
+                closing_title = json.load(f).get("title") or closing_title
+        except (json.JSONDecodeError, OSError):
+            pass
     rels = re.findall(r"file '([^']+)'", open(clips_file).read())
 
     chapters, t = [], 0.0
@@ -164,7 +175,7 @@ def compute_chapters(presentation_dir: str) -> List[dict]:
         dur = _duration(os.path.join(presentation_dir, rel))
         # YouTube rejects chapters under 10 s: a short clip folds into the one before.
         if not chapters or dur >= MIN_CHAPTER_SECS:
-            chapters.append({"start": t, "title": _clip_label(rel, titles, demos)})
+            chapters.append({"start": t, "title": _clip_label(rel, titles, demos, closing_title)})
         t += dur
     # A too-short first chapter absorbs the next one (it must stay at 0:00).
     while len(chapters) > 1 and chapters[1]["start"] < MIN_CHAPTER_SECS:
@@ -254,11 +265,16 @@ def _clean_hashtags(tags: List[str]) -> List[str]:
     return out[:3]
 
 
+def _is_http_url(value: Optional[str]) -> bool:
+    """True for an http(s) URL (a public repo/source), not a local path."""
+    return bool(value) and value.startswith(("http://", "https://"))
+
+
 def build_description(meta: dict, chapters: List[dict], source: Optional[str],
                       series: Optional[dict], ep: Optional[dict],
                       yt: Optional[YouTubeSettings] = None) -> str:
     lines = [meta["hook"], "", meta["summary"].strip(), ""]
-    if source:
+    if _is_http_url(source):
         lines.append(f"▶ Code: {source}")  # brand: the repo link comes first
     if series and ep:
         lines.append(f"▶ Series: {series.get('title')} — part {ep['id']} of {len(series['episodes'])}")

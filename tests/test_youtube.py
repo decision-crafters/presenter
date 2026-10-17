@@ -1,11 +1,17 @@
+import json
+import os
+
 from PIL import Image, ImageFont
 
+import youtube
 from youtube import (
     build_description,
     youtube_settings,
     YouTubeSettings,
+    _clip_label,
     _font_has_glyph,
     _sanitize_thumbnail_text,
+    compute_chapters,
     render_thumbnail,
 )
 
@@ -115,3 +121,37 @@ def test_render_thumbnail_handles_symbol_text(tmp_path):
     with Image.open(out) as im:
         assert im.format == "JPEG"
         assert im.size == (1280, 720)
+
+
+def test_build_description_skips_code_line_for_local_path():
+    for src in ("/workspace/presenter-test/mcp-authority.md", "./research.md", "/local/folder"):
+        desc = build_description(_meta(), _chapters(), src, None, None)
+        assert "▶ Code:" not in desc, src
+
+
+def test_build_description_keeps_code_line_for_url():
+    desc = build_description(_meta(), _chapters(), "https://github.com/o/r", None, None)
+    assert "▶ Code: https://github.com/o/r" in desc
+
+
+def test_clip_label_closing_title():
+    assert _clip_label("closing.mp4", [], []) == "Get the Code"
+    assert _clip_label("closing.mp4", [], [], "Sources") == "Sources"
+    assert _clip_label("closing.mp4", [], [], "Get the Code") == "Get the Code"
+
+
+def test_compute_chapters_uses_closing_title(monkeypatch, tmp_path):
+    d = str(tmp_path)
+    with open(os.path.join(d, "clips.txt"), "w") as f:
+        f.write("file 'slide_0/clip.mp4'\nfile 'closing.mp4'\n")
+    with open(os.path.join(d, "structure.json"), "w") as f:
+        json.dump({"slides": [{"title": "Intro", "atomic_core_idea": "x"}]}, f)
+    with open(os.path.join(d, "closing.json"), "w") as f:
+        json.dump(
+            {"title": "Sources", "narration": "...", "screenshot_index": 1,
+             "hold_seconds": 4.0},
+            f,
+        )
+    monkeypatch.setattr(youtube, "_duration", lambda path: 15.0)
+    chapters = compute_chapters(d)
+    assert [c["title"] for c in chapters] == ["Intro", "Sources"]
