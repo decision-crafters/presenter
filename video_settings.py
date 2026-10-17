@@ -82,9 +82,9 @@ class VideoSettings:
 class WatermarkSettings:
     """A corner bug overlaid on the exported video (issue #10).
 
-    ``image`` is a resolved local path (or a URL, which the renderer skips — it
-    only overlays local files). ``height`` is in pixels at the 1080p reference
-    and scales with the render resolution.
+    ``image`` is a resolved local path to a PNG (a URL or SVG is skipped with a
+    warning). ``height`` is in pixels at the 1080p reference and scales with the
+    render resolution.
     """
     image: Optional[str] = None
     position: str = "bottom-right"
@@ -140,7 +140,9 @@ def _resolve_watermark(design, raw) -> Optional[WatermarkSettings]:
     if raw is None or raw is False:
         return None
     cfg = raw if isinstance(raw, dict) else {}
-    if cfg.get("enabled") is False:
+    # Presence enables it; `enabled: false` opts out (and `enabled: true` is the
+    # explicit form of the default).
+    if cfg.get("enabled", True) is False:
         return None
     tokens = getattr(design, "tokens", None) or {}
     image = cfg.get("image") or (tokens.get("logo") if isinstance(tokens, dict) else None)
@@ -158,3 +160,21 @@ def _resolve_watermark(design, raw) -> Optional[WatermarkSettings]:
         position=str(cfg.get("position", "bottom-right")),
         height=height,
     )
+
+
+def watermark_issue(watermark: Optional[WatermarkSettings]) -> Optional[str]:
+    """Why a *configured* watermark can't be overlaid, or None.
+
+    Returns None both for "no watermark configured" (nothing to warn about) and
+    for a usable watermark; a configured-but-unusable image yields a message.
+    """
+    if not watermark or not watermark.image:
+        return None
+    img = watermark.image
+    if img.lower().startswith(("http://", "https://", "data:")):
+        return "remote image URLs aren't fetched; use a local PNG"
+    if img.lower().endswith(".svg"):
+        return "SVG isn't supported by the overlay; use a PNG"
+    if not os.path.exists(img):
+        return f"image not found: {img}"
+    return None

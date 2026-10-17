@@ -6,6 +6,7 @@ from video_settings import (
     parse_resolution,
     video_settings,
     watermark_filter,
+    watermark_issue,
 )
 
 
@@ -89,3 +90,26 @@ def test_watermark_filter_positions():
     assert watermark_filter(WatermarkSettings(image="x.png", position="bottom-left"), 1080).endswith("overlay=24:H-h-24")
     # height scales with the render resolution
     assert "scale=-1:32" in watermark_filter(WatermarkSettings(image="x.png", height=64), 540)
+
+
+def test_watermark_enabled_flag():
+    # `enabled: false` opts out even when a logo is present.
+    d = _Design({"logo": "logo.png", "video": {"watermark": {"enabled": False}}})
+    assert video_settings(d).watermark is None
+    # `enabled: true` is the explicit form of the default and enables.
+    d2 = _Design({"logo": "logo.png", "video": {"watermark": {"enabled": True}}})
+    assert video_settings(d2).watermark.image.endswith("logo.png")
+
+
+def test_watermark_issue(tmp_path):
+    # Not configured -> no warning.
+    assert watermark_issue(None) is None
+    assert watermark_issue(WatermarkSettings(image=None)) is None
+    # A valid local PNG -> no warning.
+    png = tmp_path / "logo.png"
+    png.write_bytes(b"x")
+    assert watermark_issue(WatermarkSettings(image=str(png))) is None
+    # URL / SVG / missing -> each yields a reason.
+    assert "URL" in watermark_issue(WatermarkSettings(image="https://x/logo.png"))
+    assert "SVG" in watermark_issue(WatermarkSettings(image="logo.svg"))
+    assert "not found" in watermark_issue(WatermarkSettings(image=str(tmp_path / "nope.png")))
