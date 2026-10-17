@@ -199,6 +199,14 @@ async def main():
         help="Video size: 480p | 720p | 1080p | 1440p | 2160p | WIDTHxHEIGHT "
         "(overrides the design's video.resolution; default 1080p)",
     )
+    parser.add_argument(
+        "--content-type",
+        type=str,
+        default=None,
+        help="Content type for best-practice advisories: explainer (default) | "
+        "tutorial | course | documentary | book_summary | audiobook | short "
+        "(overrides the design's content.type)",
+    )
     args = parser.parse_args()
 
     # A series episode supplies the source, design, slide count, folder, and a
@@ -314,6 +322,7 @@ async def main():
                 series=series,
                 ep=episode,
                 source=args.source,
+                content_type=args.content_type,
             )
         except Exception as e:
             print(

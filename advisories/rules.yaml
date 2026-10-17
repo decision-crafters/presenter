@@ -1,0 +1,423 @@
+# Presenter YouTube best-practice advisory rules.
+#
+# This file is the machine-readable source of truth. The human-readable
+# explanation and the per-content-type length table live in
+# docs/youtube-best-practices.md. Keep the two in sync: changing a rule's
+# wording or source here means updating that doc and bumping `last_verified`.
+#
+# Schema (every rule must have all of these):
+#   id             unique, dotted rule id (e.g. `title.length`)
+#   applies_to     list of content types or scopes this rule applies to.
+#                  One of: short, explainer, tutorial, course, documentary,
+#                  book_summary, audiobook, all, long_form.
+#   check          the engine check function name (see advisories/engine.py)
+#   params         dict of thresholds/options passed to the check
+#   severity       info | warn | error   (error is only a stronger message;
+#                  advisories never block a render)
+#   message        one-line message; may use {placeholders} filled from
+#                  `params` plus the measured values the check returns
+#   why            one-line rationale
+#   source_url     full https URL (shown verbatim to the user, never shortened)
+#   source_type    official | industry | community
+#   last_verified  ISO date YYYY-MM-DD (CI asserts it is within 12 months)
+#
+# `applies_to` matching: a rule fires when it lists `all`, the video's
+# content type, `short` (video classified as a Short), or `long_form`
+# (everything else). A video is a "Short" when its content type is `short` or
+# its aspect ratio is vertical.
+#
+# Per-rule overrides are declared in DESIGN.md under an `advisories:` block
+# keyed by rule id; `enabled: false` disables a rule, any other key overrides
+# a param.
+
+rules:
+  # ---- length: runtime should match the content type ----
+  - id: length.match_content
+    applies_to: [long_form]
+    check: length_type_range
+    params:
+      ranges:
+        explainer: { min_seconds: 180, max_seconds: 600 }
+        tutorial: { min_seconds: 300, max_seconds: 1200 }
+        course: { min_seconds: 300, max_seconds: 1800 }
+        book_summary: { min_seconds: 300, max_seconds: 900 }
+        audiobook: { min_seconds: 1800, max_seconds: 7200 }
+    severity: warn
+    message: "Runtime {duration} is outside the {min}–{max} range for {content_type} videos."
+    why: "Viewers reward videos whose runtime matches the content; padding hurts satisfaction."
+    source_url: "https://www.youtube.com/watch?v=G1tHzUGdMwY"
+    source_type: official
+    last_verified: "2026-10-17"
+
+  - id: length.type_range.short
+    applies_to: [short]
+    check: length_type_range
+    params: { max_seconds: 180 }
+    severity: warn
+    message: "Shorts longer than 3 minutes are no longer Shorts and lose Shorts features."
+    why: "Vertical or square videos up to 3 minutes are Shorts."
+    source_url: "https://support.google.com/youtube/answer/15424877"
+    source_type: official
+    last_verified: "2026-10-17"
+
+  - id: length.vertical_long
+    applies_to: [short]
+    check: duration_aspect
+    params: { aspect: vertical, max_seconds: 180 }
+    severity: info
+    message: "A vertical video longer than {max} will not be treated as a Short."
+    why: "Vertical or square uploads up to 3 minutes are Shorts; longer vertical uploads are regular videos."
+    source_url: "https://support.google.com/youtube/answer/15424877"
+    source_type: official
+    last_verified: "2026-10-17"
+
+  - id: length.type_range.documentary
+    applies_to: [documentary]
+    check: length_type_range
+    params: { min_seconds: 480, max_seconds: 3600 }
+    severity: info
+    message: "Runtime {duration} is outside the {min}–{max} range that suits TV viewers."
+    why: "TV viewing favors longer documentaries and series."
+    source_url: "https://blog.youtube/creator-and-artist-stories/creators-are-taking-over-tv-here-are-10-tips/"
+    source_type: official
+    last_verified: "2026-10-17"
+
+  - id: tv.quality_check
+    applies_to: [documentary]
+    check: metadata_field
+    params: { field: tv_checked, expected: true }
+    severity: info
+    message: "Review the final render on a TV before publishing."
+    why: "YouTube advises creators to check how their videos look on TV."
+    source_url: "https://blog.youtube/creator-and-artist-stories/creators-are-taking-over-tv-here-are-10-tips/"
+    source_type: official
+    last_verified: "2026-10-17"
+
+  # ---- length: upload mechanics ----
+  - id: length.midroll_8min
+    applies_to: [long_form]
+    check: duration_threshold
+    params: { min_seconds: 480 }
+    severity: info
+    message: "Under {limit}, the video cannot show mid-roll ads."
+    why: "Mid-roll ads require a monetized video of 8 minutes or more."
+    source_url: "https://support.google.com/youtube/answer/6175006"
+    source_type: official
+    last_verified: "2026-10-17"
+
+  - id: length.verify_15min
+    applies_to: [long_form]
+    check: duration_threshold
+    params: { max_seconds: 900 }
+    severity: warn
+    message: "Videos over {limit} need a verified account to upload."
+    why: "Uploads longer than 15 minutes require account verification."
+    source_url: "https://support.google.com/youtube/answer/71673"
+    source_type: official
+    last_verified: "2026-10-17"
+
+  - id: length.max_12h_256gb
+    applies_to: [long_form]
+    check: duration_filesize_max
+    params: { max_seconds: 43200, max_bytes: 274877906944 }
+    severity: error
+    message: "Upload exceeds the {max_duration} / {max_size} limit."
+    why: "The maximum upload is 12 hours or 256 GB, whichever comes first."
+    source_url: "https://support.google.com/youtube/answer/71673"
+    source_type: official
+    last_verified: "2026-10-17"
+
+  # ---- chapters ----
+  - id: chapters.min_count
+    applies_to: [long_form]
+    check: chapters_valid
+    params: { min_count: 3, min_seconds: 10, start_at_zero: true }
+    severity: warn
+    message: "Chapters: need at least {min_count} (have {count}), starting at 0:00, each at least {min_seconds} s."
+    why: "YouTube shows chapters only with at least 3, the first at 0:00, each at least 10 s."
+    source_url: "https://support.google.com/youtube/answer/9884579"
+    source_type: official
+    last_verified: "2026-10-17"
+
+  - id: long.chapters_required
+    applies_to: [long_form]
+    check: chapters_required_if_long
+    params: { min_duration_seconds: 600, min_count: 3 }
+    severity: info
+    message: "A {duration} video should have at least {min_count} chapters (has {count})."
+    why: "Chapters help viewers navigate longer videos."
+    source_url: "https://support.google.com/youtube/answer/9884579"
+    source_type: official
+    last_verified: "2026-10-17"
+
+  # ---- hook and retention ----
+  - id: hook.first_speech
+    applies_to: [all]
+    check: first_audio_offset
+    params: { max_seconds: 15 }
+    severity: info
+    message: "Speech should start within the first {max} seconds."
+    why: "The share of viewers still watching at 30 s is a key retention signal."
+    source_url: "https://support.google.com/youtube/answer/9314415"
+    source_type: official
+    last_verified: "2026-10-17"
+
+  - id: hook.promise_15s
+    applies_to: [all]
+    check: metadata_field
+    params: { field: hook_promise_checked, expected: true }
+    severity: info
+    message: "Confirm the first 15 s delivers the title/thumbnail promise."
+    why: "Hooks must deliver on the thumbnail and title promise to hold viewers."
+    source_url: "https://www.youtube.com/creators/grow/overview/"
+    source_type: official
+    last_verified: "2026-10-17"
+
+  - id: description.hook_above_fold
+    applies_to: [all]
+    check: description_hook
+    params: { max_chars: 150 }
+    severity: warn
+    message: "The hook is {length} characters; it is cut above the fold past {max}."
+    why: "Only the first ~150 characters of the description show above the fold."
+    source_url: "https://www.youtube.com/creators/grow/overview/"
+    source_type: official
+    last_verified: "2026-10-17"
+
+  - id: meta.embeddable
+    applies_to: [all]
+    check: metadata_field
+    params: { field: embeddable, expected: true }
+    severity: info
+    message: "Allow embedding so viewers can share the video."
+    why: "The Grow guide recommends allowing embeds to reach more viewers."
+    source_url: "https://www.youtube.com/creators/grow/overview/"
+    source_type: official
+    last_verified: "2026-10-17"
+
+  # ---- end screens ----
+  - id: endscreen.min_window
+    applies_to: [long_form]
+    check: outro_hold
+    params: { min_seconds: 5, max_seconds: 20 }
+    severity: info
+    message: "End screens can only appear in the last {min}–{max} seconds (hold is {hold} s)."
+    why: "End screens show in the final 5–20 seconds of a video."
+    source_url: "https://support.google.com/youtube/answer/6388789"
+    source_type: official
+    last_verified: "2026-10-17"
+
+  - id: endscreen.min_video_25s
+    applies_to: [long_form]
+    check: duration_threshold
+    params: { min_seconds: 25 }
+    severity: info
+    message: "Videos under {limit} cannot show end screens."
+    why: "End screens require a video at least 25 seconds long."
+    source_url: "https://support.google.com/youtube/answer/6388789"
+    source_type: official
+    last_verified: "2026-10-17"
+
+  - id: shorts.no_chapters_endscreen
+    applies_to: [short]
+    check: chapters_valid
+    params: { max_count: 0 }
+    severity: warn
+    message: "Shorts do not use chapters or end screens (found {count})."
+    why: "Shorts have no chapter or end-screen features."
+    source_url: "https://support.google.com/youtube/answer/6388789"
+    source_type: official
+    last_verified: "2026-10-17"
+
+  # ---- Shorts ----
+  - id: shorts.vertical_layout
+    applies_to: [short]
+    check: layout_spec
+    params: { aspect: vertical, max_height: 1080 }
+    severity: warn
+    message: "Shorts should be vertical, up to 1080p."
+    why: "Shorts basics: a vertical upload, up to 1080p."
+    source_url: "https://support.google.com/youtube/answer/10059070"
+    source_type: official
+    last_verified: "2026-10-17"
+
+  - id: meta.made_for_kids
+    applies_to: [all]
+    check: metadata_field
+    params: { field: made_for_kids }
+    severity: info
+    message: "Set the made-for-kids audience choice for this video."
+    why: "Uploads require a made-for-kids audience choice."
+    source_url: "https://support.google.com/youtube/answer/10059070"
+    source_type: official
+    last_verified: "2026-10-17"
+
+  - id: shorts.hook_first_second
+    applies_to: [short]
+    check: first_audio_offset
+    params: { max_seconds: 1 }
+    severity: info
+    message: "Hook viewers in the first second."
+    why: "Shorts need an instant hook."
+    source_url: "https://blog.youtube/creator-and-artist-stories/youtube-related-videos-traffic-guide/"
+    source_type: official
+    last_verified: "2026-10-17"
+
+  - id: shorts.related_video_cta
+    applies_to: [short]
+    check: metadata_field
+    params: { field: related_video_url }
+    severity: info
+    message: "Add a related-video link in the final seconds."
+    why: "A related-video CTA in the final 5 s drives more views."
+    source_url: "https://blog.youtube/creator-and-artist-stories/youtube-related-videos-traffic-guide/"
+    source_type: official
+    last_verified: "2026-10-17"
+
+  # ---- thumbnails ----
+  - id: thumb.size
+    applies_to: [long_form]
+    check: thumbnail_spec
+    params: { aspect: "16:9", max_bytes: 2097152 }
+    severity: warn
+    message: "Custom thumbnail should be {aspect}, under {max_size} (yours is {size})."
+    why: "Custom thumbnails are 16:9, under 2 MB."
+    source_url: "https://support.google.com/youtube/answer/72431"
+    source_type: official
+    last_verified: "2026-10-17"
+
+  - id: thumb.shorts_size
+    applies_to: [short]
+    check: thumbnail_spec
+    params: { aspect: "9:16", max_bytes: 2097152 }
+    severity: warn
+    message: "Short thumbnail should be {aspect}, under {max_size} (yours is {size})."
+    why: "Shorts thumbnails use 9:16."
+    source_url: "https://support.google.com/youtube/answer/72431"
+    source_type: official
+    last_verified: "2026-10-17"
+
+  - id: thumb.variants
+    applies_to: [long_form]
+    check: metadata_field
+    params: { field: thumb_variants }
+    severity: info
+    message: "A/B test up to 3 thumbnail variants."
+    why: "Test & compare: up to 3 thumbnails, chosen by watch-time share."
+    source_url: "https://support.google.com/youtube/answer/13861714"
+    source_type: official
+    last_verified: "2026-10-17"
+
+  - id: thumb.readable
+    applies_to: [all]
+    check: metadata_field
+    params: { field: thumb_readable, expected: true }
+    severity: info
+    message: "Keep the thumbnail legible at small sizes."
+    why: "Readable thumbnails at small sizes perform better."
+    source_url: "https://www.youtube.com/creators/grow/optimize-your-content/"
+    source_type: official
+    last_verified: "2026-10-17"
+
+  # ---- title ----
+  - id: title.length
+    applies_to: [all]
+    check: title_length
+    params: { min_chars: 45, max_chars: 60 }
+    severity: warn
+    message: "Title is {length} characters; aim for {min}–{max}."
+    why: "Titles over 60 characters truncate on mobile."
+    source_url: "https://www.youtube.com/creators/grow/optimize-your-content/"
+    source_type: official
+    last_verified: "2026-10-17"
+
+  - id: title.keyword_first
+    applies_to: [all]
+    check: keyword_position
+    params: { within_words: 3 }
+    severity: info
+    message: "Put the main keyword in the first {within} words of the title."
+    why: "Keywords early in the title help search and click-through."
+    source_url: "https://www.youtube.com/creators/grow/optimize-your-content/"
+    source_type: official
+    last_verified: "2026-10-17"
+
+  - id: title.caps_emoji
+    applies_to: [all]
+    check: title_style
+    params: { max_uppercase_ratio: 0.5, allow_emoji: false }
+    severity: info
+    message: "Avoid overusing caps and emoji in the title."
+    why: "No ALL CAPS or emoji overuse in titles."
+    source_url: "https://www.youtube.com/creators/grow/optimize-your-content/"
+    source_type: official
+    last_verified: "2026-10-17"
+
+  # ---- captions ----
+  - id: captions.present
+    applies_to: [all]
+    check: captions_file
+    params: { required: true }
+    severity: info
+    message: "Add captions to the video."
+    why: "Captions improve reach and accessibility."
+    source_url: "https://www.youtube.com/creators/grow/optimize-your-content/"
+    source_type: official
+    last_verified: "2026-10-17"
+
+  - id: captions.translations
+    applies_to: [all]
+    check: metadata_field
+    params: { field: captions_translated }
+    severity: info
+    message: "Add caption translations for your audience."
+    why: "Captions and translations reach a wider audience."
+    source_url: "https://www.youtube.com/creators/grow/understand-your-audience/"
+    source_type: official
+    last_verified: "2026-10-17"
+
+  # ---- series / courses ----
+  - id: series.playlist
+    applies_to: [long_form]
+    check: metadata_field
+    params: { field: playlist }
+    severity: info
+    message: "Add the video to a playlist."
+    why: "Playlists keep viewers watching."
+    source_url: "https://www.youtube.com/creators/grow/understand-your-audience/"
+    source_type: official
+    last_verified: "2026-10-17"
+
+  - id: course.playlist
+    applies_to: [course]
+    check: metadata_field
+    params: { field: course_playlist }
+    severity: info
+    message: "Publish as a YouTube Course (at least 3 videos, up to 5 PDFs each)."
+    why: "Courses need at least 3 videos and must teach something."
+    source_url: "https://support.google.com/youtube/answer/15128409"
+    source_type: official
+    last_verified: "2026-10-17"
+
+  # ---- legal / disclosure ----
+  - id: meta.ai_disclosure
+    applies_to: [all]
+    check: metadata_field
+    params: { field: ai_disclosure }
+    severity: info
+    message: "Disclose realistic AI-generated content."
+    why: "Realistic AI content must be disclosed; own-voice cloning is exempt."
+    source_url: "https://support.google.com/youtube/answer/14328491"
+    source_type: official
+    last_verified: "2026-10-17"
+
+  - id: copyright.book_content
+    applies_to: [book_summary, audiobook]
+    check: content_rights
+    params: { allowed: [own, public_domain, licensed] }
+    severity: error
+    message: "Book content needs clear rights: {allowed} (declared: {rights})."
+    why: "Fair use is not automatic; credit or disclaimers are not fair use."
+    source_url: "https://support.google.com/youtube/answer/9783148"
+    source_type: official
+    last_verified: "2026-10-17"
