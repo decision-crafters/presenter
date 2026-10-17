@@ -1,7 +1,6 @@
 from llama_index.core.llms.llm import LLM
 from llama_index.core.prompts.base import PromptTemplate
 
-
 from models import PresentationStructure, StructureFeedback
 
 PRESENTATION_STRUCTURE_UPDATE_PROMPT = """

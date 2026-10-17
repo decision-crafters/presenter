@@ -4,9 +4,9 @@ version: 2.1
 #
 # - Python is pinned to 3.11: kokoro (the offline TTS engine) publishes no wheel
 #   for Python 3.13+, and the repo docs require 3.11 specifically.
-# - There is no build step (no setup.py / pyproject.toml, the app runs directly)
-#   and no linter is configured, so those steps are intentionally skipped.
+# - There is no build step (no packaging, the app runs directly).
 # - No lockfile exists, so the pip cache is keyed on the requirements files.
+# - Lint (ruff), type checking (mypy), and tests (pytest) run after install.
 
 jobs:
   build-and-test:
@@ -33,8 +33,17 @@ jobs:
           paths:
             - ~/.cache/pip
 
-      # No build step: Presenter has no packaging (no setup.py / pyproject.toml).
-      # No lint step: no linter (ruff/flake8/black) is configured in the repo.
+      - run:
+          name: Lint (ruff)
+          command: |
+            . .venv/bin/activate
+            ruff check .
+
+      - run:
+          name: Type check (mypy)
+          command: |
+            . .venv/bin/activate
+            mypy .
 
       - run:
           name: Run tests

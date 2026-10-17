@@ -21,10 +21,8 @@ and nothing else changes.
 import os
 import subprocess
 from dataclasses import dataclass, field
-from typing import List, Optional
 
 from guide import _split_frontmatter
-
 
 # Cross-cutting technical terms Kokoro tends to mangle. Always applied (even with
 # no --persona) so decks sound better by default; a persona's own map overrides
@@ -73,7 +71,7 @@ BUILTIN_PRONUNCIATIONS = {
 DEFAULT_VOICE_BY_GENDER = {"female": "af_heart", "male": "am_michael"}
 
 
-def voice_gender(voice: str) -> Optional[str]:
+def voice_gender(voice: str) -> str | None:
     """Return 'female'/'male' inferred from a Kokoro voice name, or None."""
     if not voice or len(voice) < 3 or voice[2] != "_":
         return None
@@ -91,9 +89,9 @@ class Persona:
     gender: str = ""  # 'female'/'male' — kept consistent with the voice
     steering: str = ""  # Markdown body -> STEERING GUIDANCE
     pronunciations: dict = field(default_factory=dict)
-    domains: List[str] = field(default_factory=list)
-    design_ref: Optional[str] = None
-    source_dir: Optional[str] = None
+    domains: list[str] = field(default_factory=list)
+    design_ref: str | None = None
+    source_dir: str | None = None
 
     @property
     def is_empty(self) -> bool:
@@ -110,7 +108,7 @@ def _resolve_file(path: str) -> str:
     return path
 
 
-def load_persona(path: Optional[str] = None) -> Persona:
+def load_persona(path: str | None = None) -> Persona:
     """Load a persona from a ``PERSONA.md`` (file or directory).
 
     ``path`` explicit -> must exist (fail loudly). ``path`` None -> auto-discover
@@ -134,11 +132,11 @@ def load_persona(path: Optional[str] = None) -> Persona:
         if resolved is None:
             return Persona(pronunciations=dict(BUILTIN_PRONUNCIATIONS))
 
-    with open(resolved, "r") as f:
+    with open(resolved) as f:
         text = f.read()
     frontmatter, body = _split_frontmatter(text)
 
-    tokens = {}
+    tokens: dict = {}
     if frontmatter:
         try:
             import yaml
@@ -195,9 +193,9 @@ def load_persona(path: Optional[str] = None) -> Persona:
     return persona
 
 
-def list_personas(personas_dir: str = "personas") -> List[Persona]:
+def list_personas(personas_dir: str = "personas") -> list[Persona]:
     """Load every ``personas/<name>/PERSONA.md`` for selection/cataloguing."""
-    out = []
+    out: list = []
     if not os.path.isdir(personas_dir):
         return out
     for name in sorted(os.listdir(personas_dir)):
@@ -217,8 +215,8 @@ def select_persona(summary: str, llm, personas_dir: str = "personas"):
     personas' name/description/domains. A low-confidence / no-fit answer returns
     ``(None, <detected-domain>)`` so the caller can offer to file a gap issue.
     """
-    from pydantic import BaseModel, Field
     from llama_index.core.prompts.base import PromptTemplate
+    from pydantic import BaseModel, Field
 
     personas = list_personas(personas_dir)
     if not personas:
@@ -257,7 +255,7 @@ def select_persona(summary: str, llm, personas_dir: str = "personas"):
     return None, choice.detected_domain or "unknown"
 
 
-def _persona_stub(domain: str, terms: List[str]) -> str:
+def _persona_stub(domain: str, terms: list[str]) -> str:
     """A ready-to-edit PERSONA.md skeleton for a missing domain."""
     slug = "".join(c if c.isalnum() else "-" for c in domain.lower()).strip("-") or "new"
     lex = "\n".join(f"  {t}: {t}" for t in terms[:12]) or "  # term: spoken form"
@@ -278,8 +276,8 @@ def _persona_stub(domain: str, terms: List[str]) -> str:
 
 def open_persona_gap_issue(
     domain: str,
-    terms: Optional[List[str]] = None,
-    repo: Optional[str] = None,
+    terms: list[str] | None = None,
+    repo: str | None = None,
 ) -> bool:
     """File a 'new persona needed' GitHub issue via ``gh``. Opt-in / confirmed by
     the caller. If ``gh`` is missing or unauthed, print the prefilled body and

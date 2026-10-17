@@ -1,6 +1,5 @@
-import json
 import os
-from typing import List, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field, create_model
 
@@ -14,18 +13,18 @@ class SlideInfo(BaseModel):
 
 class PresentationStructureWithTitle(BaseModel):
     title: str = Field(..., description="Title of the presentation")
-    slides: List[SlideInfo] = Field(
+    slides: list[SlideInfo] = Field(
         ..., description="List of slides information in the presentation"
     )
 
 
 class PresentationStructure(BaseModel):
-    slides: List[SlideInfo] = Field(
+    slides: list[SlideInfo] = Field(
         ..., description="List of slides information in the presentation"
     )
 
 
-def make_structure_model(with_title: bool, target_slides: Optional[int] = None):
+def make_structure_model(with_title: bool, target_slides: int | None = None):
     """Return the structured-output model for a presentation structure.
 
     ``with_title`` adds the ``title`` field (the data-driven path). When
@@ -41,10 +40,10 @@ def make_structure_model(with_title: bool, target_slides: Optional[int] = None):
         max_length=target_slides,
         description="List of slides information in the presentation",
     )
-    fields = {}
+    fields: dict[str, Any] = {}
     if with_title:
         fields["title"] = (str, Field(..., description="Title of the presentation"))
-    fields["slides"] = (List[SlideInfo], slides)
+    fields["slides"] = (list[SlideInfo], slides)
     name = "PresentationStructureWithTitle" if with_title else "PresentationStructure"
     return create_model(name, **fields)
 
@@ -67,7 +66,7 @@ def enforce_slide_count(
 
 class EpisodePlan(BaseModel):
     title: str = Field(..., description="Short episode title, 3-6 words")
-    pillar: Optional[str] = Field(
+    pillar: str | None = Field(
         None, description="Optional content pillar or category for the episode"
     )
     thesis: str = Field(
@@ -77,7 +76,7 @@ class EpisodePlan(BaseModel):
 
 
 class SeriesPlan(BaseModel):
-    episodes: List[EpisodePlan] = Field(
+    episodes: list[EpisodePlan] = Field(
         ..., description="Distinct, non-overlapping episodes, in viewing order"
     )
 
@@ -87,7 +86,7 @@ class YouTubeMetadata(BaseModel):
         ...,
         description="Video title, 45-60 characters, the main search keyword in the first few words, specific and honest (no clickbait, no ALL CAPS, no emoji)",
     )
-    alt_titles: List[str] = Field(
+    alt_titles: list[str] = Field(
         ..., description="Two alternative titles with a different angle, same rules, for A/B testing"
     )
     hook: str = Field(
@@ -98,10 +97,10 @@ class YouTubeMetadata(BaseModel):
         ...,
         description="2 short paragraphs (80-150 words total) on what the video covers and the decision it helps with, using the main keywords naturally",
     )
-    tags: List[str] = Field(
+    tags: list[str] = Field(
         ..., description="5-8 specific search tags, each at most 30 characters, most important first"
     )
-    hashtags: List[str] = Field(
+    hashtags: list[str] = Field(
         ..., description="Exactly 3 relevant hashtags without spaces, e.g. #AIAgents"
     )
     thumbnail_text: str = Field(
@@ -118,7 +117,7 @@ class StructureFeedback(BaseModel):
         ...,
         description="Whether all the slides represent atomic core ideas and can be narrated in 40-50 seconds",
     )
-    feedback: Optional[str] = Field(
+    feedback: str | None = Field(
         None,
         description="If all the slides are not perfect then feedback on which slides need to be broken down and how",
     )
@@ -133,7 +132,7 @@ class Slide(BaseModel):
         ...,
         description="Narration for the slide. The content should be narrated in 40-60 seconds",
     )
-    image_query: Optional[str] = Field(
+    image_query: str | None = Field(
         None,
         description="Optional short search phrase or prompt for a supporting photo, only when a picture would strengthen the slide and it has no diagram",
     )
@@ -145,7 +144,7 @@ STRUCTURE_FILE = "structure.json"
 _LEGACY_STRUCTURE_FILE = "structure.pkl"
 
 
-def structure_cache_path(folder: str) -> Optional[str]:
+def structure_cache_path(folder: str) -> str | None:
     """Path to a cached structure, preferring JSON over the legacy pickle."""
     for name in (STRUCTURE_FILE, _LEGACY_STRUCTURE_FILE):
         path = os.path.join(folder, name)

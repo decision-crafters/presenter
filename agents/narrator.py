@@ -49,7 +49,7 @@ def apply_pronunciations(text: str, lexicon: dict) -> str:
 
 # Lazily-initialized singleton pipeline, keyed by language code, so the model is
 # loaded once per process rather than per slide.
-_PIPELINES = {}
+_PIPELINES: dict = {}
 
 
 def _get_pipeline(lang_code: str):
@@ -88,8 +88,7 @@ async def narrate(
         subprocess.run(
             ["ffmpeg", "-y", "-i", wav_path, output_file],
             check=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
         )
     finally:
         if os.path.exists(wav_path):

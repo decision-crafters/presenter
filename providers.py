@@ -12,7 +12,6 @@ Selection comes from ``--provider``/``--model`` on the CLI, falling back to the
 """
 
 import os
-from typing import Optional
 
 from llama_index.core.llms.llm import LLM
 
@@ -35,11 +34,11 @@ OLLAMA_CONTEXT_WINDOW = 8000
 OLLAMA_CLOUD_BASE_URL = "https://ollama.com/v1"
 
 
-def resolve_provider(provider: Optional[str]) -> str:
+def resolve_provider(provider: str | None) -> str:
     return (provider or os.getenv("LLM_PROVIDER") or DEFAULT_PROVIDER).lower()
 
 
-def resolve_model(provider: str, model: Optional[str]) -> str:
+def resolve_model(provider: str, model: str | None) -> str:
     return model or os.getenv("LLM_MODEL") or DEFAULT_MODELS.get(provider, "")
 
 
@@ -51,7 +50,7 @@ def force_tool_required() -> bool:
     )
 
 
-def build_llm(provider: Optional[str] = None, model: Optional[str] = None) -> LLM:
+def build_llm(provider: str | None = None, model: str | None = None) -> LLM:
     """Construct the LLM for the given provider.
 
     Imports are done lazily so a missing optional package only fails when that

@@ -1,27 +1,26 @@
-from typing import Any, Optional
-import subprocess
-import os
 import json
+import os
+import subprocess
+from typing import Any
 
 from llama_index.core.workflow import (
-    step,
     Context,
-    Workflow,
     Event,
     StartEvent,
     StopEvent,
+    Workflow,
+    step,
 )
 from llama_index.core.workflow.retry_policy import ConstantDelayRetryPolicy
 
-from models import PresentationStructure, load_structure, structure_cache_path
 from agents.narrator import narrate
+from models import PresentationStructure, load_structure, structure_cache_path
 from video_settings import (
     DEFAULT_RESOLUTION,
     WatermarkSettings,
     watermark_filter,
     watermark_issue,
 )
-
 
 # Playback speed for the narration in the exported video. 1.0 = Kokoro's
 # natural speaking pace. Values > 1.0 speed it up (1.4 was the old hardcoded
@@ -51,7 +50,7 @@ def _media_duration(path: str) -> float:
         r = subprocess.run(
             ["ffprobe", "-v", "error", "-show_entries", "format=duration",
              "-of", "json", path],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            capture_output=True, text=True,
         )
         if r.returncode != 0:
             return 0.0
@@ -76,7 +75,7 @@ def _build_demo_clip(media_path, caption_mp3, duration: float, out_file: str, vf
         "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2",
         out_file,
     ]
-    r = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    r = subprocess.run(cmd, capture_output=True)
     return r.returncode == 0 and os.path.exists(out_file)
 
 
@@ -101,7 +100,7 @@ class PresenterVideoCreaterWorkflow(Workflow):
         lang_code: str = "a",
         pronunciations: dict = None,
         resolution: tuple = DEFAULT_RESOLUTION,
-        watermark: Optional[WatermarkSettings] = None,
+        watermark: WatermarkSettings | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
@@ -117,7 +116,7 @@ class PresenterVideoCreaterWorkflow(Workflow):
     @step
     async def start(
         self, ctx: Context, ev: StartEvent
-    ) -> NarrationRequestReceived | StopEvent:
+    ) -> NarrationRequestReceived | StopEvent | None:
         presentation_dir = ev.presentation_dir
         await ctx.store.set("presentation_dir", presentation_dir)
         if not structure_cache_path(presentation_dir):
@@ -128,6 +127,7 @@ class PresenterVideoCreaterWorkflow(Workflow):
         await ctx.store.set("num_slides", len(slides))
         for i in range(len(slides)):
             ctx.send_event(NarrationRequestReceived(slide_index=i))
+        return None
 
     @step(num_workers=5, retry_policy=ConstantDelayRetryPolicy())
     async def narrate_slide(
@@ -141,7 +141,7 @@ class PresenterVideoCreaterWorkflow(Workflow):
         print(f"\n> Narrating slide_{slide_index}\n")
         if os.path.exists(narration_audio_file):
             return SlideNarrated(slide_index=slide_index)
-        with open(narration_file, "r") as f:
+        with open(narration_file) as f:
             narration = f.read()
         await narrate(
             narration, self.voice, narration_audio_file,
@@ -173,8 +173,7 @@ class PresenterVideoCreaterWorkflow(Workflow):
                 "-of", "json",
                 slide_audio_file,
             ],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
             text=True,
         )
         if result.returncode != 0:
@@ -194,8 +193,7 @@ class PresenterVideoCreaterWorkflow(Workflow):
                 "-filter:a", f"atempo={NARRATION_TEMPO}",
                 slide_clip_file,
             ],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
         )
         if r.returncode != 0 or not os.path.exists(slide_clip_file):
             raise RuntimeError(
@@ -229,10 +227,11 @@ class PresenterVideoCreaterWorkflow(Workflow):
                 # Prefer the runtime-sized walkthrough written at deck build; fall
                 # back to a short title caption if none is present.
                 script = demo.get("narration") or f"Demo: {demo.get('title') or 'demo'}"
-                caption_mp3 = os.path.join(presentation_dir, f"demo_{idx}_caption.mp3")
+                caption_path = os.path.join(presentation_dir, f"demo_{idx}_caption.mp3")
+                caption_mp3: str | None = caption_path
                 try:
                     await narrate(
-                        script, self.voice, caption_mp3, lang_code=self.lang_code,
+                        script, self.voice, caption_path, lang_code=self.lang_code,
                         pronunciations=self.pronunciations,
                     )
                 except Exception:
@@ -276,11 +275,12 @@ class PresenterVideoCreaterWorkflow(Workflow):
         clip_file = os.path.join(presentation_dir, "closing.mp4")
         if not os.path.exists(clip_file):
             print("\n> Creating closing CTA clip\n")
-            caption_mp3 = os.path.join(presentation_dir, "closing_caption.mp3")
+            caption_path = os.path.join(presentation_dir, "closing_caption.mp3")
+            caption_mp3: str | None = caption_path
             try:
                 await narrate(
                     closing.get("narration") or "Get the code linked on screen.",
-                    self.voice, caption_mp3, lang_code=self.lang_code,
+                    self.voice, caption_path, lang_code=self.lang_code,
                     pronunciations=self.pronunciations,
                 )
             except Exception:
@@ -304,7 +304,7 @@ class PresenterVideoCreaterWorkflow(Workflow):
         return os.path.relpath(clip_file, presentation_dir)
 
     @step
-    async def combine_clips(self, ctx: Context, ev: SlideClipCreated) -> StopEvent:
+    async def combine_clips(self, ctx: Context, ev: SlideClipCreated) -> StopEvent | None:
         num_slides = await ctx.store.get("num_slides")
         presentation_dir = await ctx.store.get("presentation_dir")
         events = ctx.collect_events(ev, [SlideClipCreated] * num_slides)
@@ -331,8 +331,7 @@ class PresenterVideoCreaterWorkflow(Workflow):
                 "ffmpeg", "-y", "-f", "concat", "-safe", "0",
                 "-i", all_clips_file, "-c", "copy", presentation_video_file,
             ],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
         )
         if r.returncode != 0 or not os.path.exists(presentation_video_file):
             raise RuntimeError(
@@ -366,8 +365,7 @@ class PresenterVideoCreaterWorkflow(Workflow):
                 "-crf", WATERMARK_CRF, "-preset", WATERMARK_PRESET,
                 "-c:a", "copy", tmp,
             ],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
         )
         if r.returncode != 0 or not os.path.exists(tmp):
             print(

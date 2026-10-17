@@ -18,7 +18,7 @@ import re
 import shutil
 import subprocess
 import tempfile
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING
 from urllib.parse import urlparse, urlunparse
 
 if TYPE_CHECKING:
@@ -61,7 +61,7 @@ def _is_github_url(source: str) -> bool:
     return bool(GITHUB_URL_RE.match(source.strip()))
 
 
-def _repomix_command() -> List[str]:
+def _repomix_command() -> list[str]:
     """Prefer a globally installed `repomix`, else run it via `npx`."""
     if shutil.which("repomix"):
         return ["repomix"]
@@ -76,7 +76,7 @@ def _repomix_command() -> List[str]:
 _FILE_SECTION_RE = re.compile(r"^## File: (.+?)\s*$", re.MULTILINE)
 
 
-def _prioritize_packed(packed: str, focus: Optional[List[str]] = None) -> str:
+def _prioritize_packed(packed: str, focus: list[str] | None = None) -> str:
     """Reorder repomix's per-file sections so README/specs come first.
 
     repomix packs files in directory order; because we then cap total size, we
@@ -97,7 +97,7 @@ def _prioritize_packed(packed: str, focus: Optional[List[str]] = None) -> str:
     return preamble + "".join(s[2] for s in sections)
 
 
-def _pack_repo(url: str, focus: Optional[List[str]] = None) -> str:
+def _pack_repo(url: str, focus: list[str] | None = None) -> str:
     """Pack a remote repo's docs into one Markdown blob via repomix.
 
     repomix handles the remote fetch, honors .gitignore, and runs a Secretlint
@@ -119,17 +119,16 @@ def _pack_repo(url: str, focus: Optional[List[str]] = None) -> str:
                 "--quiet",
             ],
             check=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
         )
-        with open(out_path, "r") as f:
+        with open(out_path) as f:
             return _prioritize_packed(f.read(), focus)
     finally:
         if os.path.exists(out_path):
             os.remove(out_path)
 
 
-def _matches_focus(rel_path: str, focus: Optional[List[str]]) -> bool:
+def _matches_focus(rel_path: str, focus: list[str] | None) -> bool:
     """True if a path matches a focus glob (``docs/workflows/*.md``) or prefix."""
     rel = rel_path.replace(os.sep, "/").lstrip("./")
     for pat in focus or []:
@@ -139,7 +138,7 @@ def _matches_focus(rel_path: str, focus: Optional[List[str]]) -> bool:
     return False
 
 
-def _file_priority(rel_path: str, focus: Optional[List[str]] = None) -> int:
+def _file_priority(rel_path: str, focus: list[str] | None = None) -> int:
     """Lower sorts first: focus files, README, specs/references, docs/, rest.
 
     Many repos keep their real conceptual signal in ``*.spec.md`` files and in
@@ -167,7 +166,7 @@ def _file_priority(rel_path: str, focus: Optional[List[str]] = None) -> int:
     return 4
 
 
-def _collect_files(root: str, focus: Optional[List[str]] = None) -> List[str]:
+def _collect_files(root: str, focus: list[str] | None = None) -> list[str]:
     """Walk ``root`` and return prioritized, capped list of ingestible files."""
     candidates = []
     for dirpath, dirnames, filenames in os.walk(root):
@@ -182,7 +181,7 @@ def _collect_files(root: str, focus: Optional[List[str]] = None) -> List[str]:
 
     candidates.sort(key=lambda c: (c[0], c[1]))
 
-    selected: List[str] = []
+    selected: list[str] = []
     total = 0
     for _, _, full in candidates:
         try:
@@ -221,7 +220,7 @@ def _url_host(url: str) -> str:
 
 def _url_ext(url: str) -> str:
     """Lowercase extension of a URL path, ignoring any ``?query``/``#fragment``."""
-    path = re.split(r"[?#]", url, 1)[0]
+    path = re.split(r"[?#]", url, maxsplit=1)[0]
     return os.path.splitext(path)[1].lower()
 
 
@@ -247,15 +246,15 @@ def _is_asset_or_tracking(url: str) -> bool:
     return False
 
 
-def extract_reference_urls(docs, limit: int = 8) -> List[str]:
+def extract_reference_urls(docs, limit: int = 8) -> list[str]:
     """Collect up to ``limit`` unique http(s) URLs from the ingested documents.
 
     Skips image-credit/tracking links (Unsplash/Pexels/Pixabay/Gravatar, any
     ``utm_campaign=api-credit``, and image files), strips ``utm_*`` params, and
     prefers URLs listed under a "Sources"/"References" heading over those found
     elsewhere in the text."""
-    preferred: List[str] = []
-    other: List[str] = []
+    preferred: list[str] = []
+    other: list[str] = []
     seen: set = set()
 
     def add(url: str, in_section: bool) -> None:
@@ -281,11 +280,11 @@ def extract_reference_urls(docs, limit: int = 8) -> List[str]:
 _BULLET_RE = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+(.*\S)")
 
 
-def extract_source_citations(docs, limit: int = 12) -> List[str]:
+def extract_source_citations(docs, limit: int = 12) -> list[str]:
     """Collect the bulleted entries under a document's own "Sources" /
     "References" heading (the list a research write-up ends with), trimmed to a
     slide-friendly "Publisher — Title" form. Empty when there is no such section."""
-    out: List[str] = []
+    out: list[str] = []
     for d in docs:
         in_section = False
         for line in (getattr(d, "text", "") or "").splitlines():
@@ -317,11 +316,11 @@ _TAPE_OUTPUT_RE = re.compile(
 
 def _demo_ext(url: str) -> str:
     """Extension of a media URL/path, ignoring any ``?query``/``#fragment``."""
-    path = re.split(r"[?#]", url, 1)[0]
+    path = re.split(r"[?#]", url, maxsplit=1)[0]
     return os.path.splitext(path)[1].lower()
 
 
-def extract_demo_media(docs, source: str = None) -> "List[dict]":
+def extract_demo_media(docs, source: str = None) -> "list[dict]":
     """Find demo recordings (GIF/MP4/WebM) to embed on a Demo slide.
 
     Two general signals, neither tied to any one repo:
@@ -335,7 +334,7 @@ def extract_demo_media(docs, source: str = None) -> "List[dict]":
     Returns a de-duplicated ``[{"title", "url"}]`` where ``url`` is an http(s)
     link or a local path (the download step handles both).
     """
-    items: "List[dict]" = []
+    items: list[dict] = []
     seen = set()
 
     def add(title: str, url: str) -> None:
@@ -368,7 +367,7 @@ def extract_demo_media(docs, source: str = None) -> "List[dict]":
     return items
 
 
-def fetch_repo_tape(source: str, basename: str) -> Optional[str]:
+def fetch_repo_tape(source: str, basename: str) -> str | None:
     """Fetch a VHS ``<basename>.tape`` from a GitHub repo (the typed commands),
     so a demo walkthrough can describe the real steps. Uses ``gh`` (authed);
     returns None on any failure — the walkthrough then falls back to context."""
@@ -408,7 +407,7 @@ def _tape_output_path(tape_file: str, root: str):
     it exists on disk. The path may be written relative to the repo root or to
     the tape's own directory, so try both."""
     try:
-        with open(tape_file, "r", errors="ignore") as f:
+        with open(tape_file, errors="ignore") as f:
             match = _TAPE_OUTPUT_RE.search(f.read())
     except OSError:
         return None
@@ -429,8 +428,8 @@ def _tape_output_path(tape_file: str, root: str):
 
 
 def load_source_documents(
-    source: str, focus: Optional[List[str]] = None
-) -> "List[Document]":
+    source: str, focus: list[str] | None = None
+) -> "list[Document]":
     """Load documents from a GitHub URL or a local file/directory.
 
     Oversized files are truncated so none dominates the model's context, and a

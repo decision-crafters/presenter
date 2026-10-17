@@ -145,6 +145,12 @@ python run.py "my topic" --design .presenter-local/my-brand \
 
   `.presenter-local/` is gitignored, so those files never ship. The engine and the neutral example brands stay public; only your brand's specifics live locally.
 
+  To confirm a private brand is really ignored (the command prints the path when it is):
+
+  ```bash
+  git check-ignore .presenter-local/my-brand/DESIGN.md
+  ```
+
 - Add `--export-video` argument to generate a full video of the presentation with voiceover (pick a Kokoro voice with `--voice`, or let a `--persona` set it). Videos render at 1080p by default; choose another size with `--resolution` (or a brand's `video.resolution`):
 
 ```bash

@@ -13,7 +13,7 @@ from video_settings import (
 @dataclass
 class _Design:
     tokens: dict
-    source_dir: str = None
+    source_dir: str | None = None
 
 
 def test_default_is_1080p():
