@@ -2,7 +2,7 @@ import json
 import os
 from typing import List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, create_model
 
 
 class SlideInfo(BaseModel):
@@ -23,6 +23,46 @@ class PresentationStructure(BaseModel):
     slides: List[SlideInfo] = Field(
         ..., description="List of slides information in the presentation"
     )
+
+
+def make_structure_model(with_title: bool, target_slides: Optional[int] = None):
+    """Return the structured-output model for a presentation structure.
+
+    ``with_title`` adds the ``title`` field (the data-driven path). When
+    ``target_slides`` is given, the ``slides`` field is pinned to exactly that
+    count via JSON-schema ``minItems``/``maxItems`` (strict mode); otherwise the
+    plain static class is returned (the loose "target" behavior).
+    """
+    if target_slides is None:
+        return PresentationStructureWithTitle if with_title else PresentationStructure
+    slides = Field(
+        ...,
+        min_length=target_slides,
+        max_length=target_slides,
+        description="List of slides information in the presentation",
+    )
+    fields = {}
+    if with_title:
+        fields["title"] = (str, Field(..., description="Title of the presentation"))
+    fields["slides"] = (List[SlideInfo], slides)
+    name = "PresentationStructureWithTitle" if with_title else "PresentationStructure"
+    return create_model(name, **fields)
+
+
+def enforce_slide_count(
+    structure: "PresentationStructure", target: int
+) -> "PresentationStructure":
+    """Trim a structure to exactly ``target`` slides by dropping excess deep-dive
+    slides, preserving the first (hook) and last (zoom-out) slides. A no-op when
+    the structure already has ``<= target`` slides."""
+    slides = structure.slides
+    if len(slides) <= target:
+        return structure
+    if target <= 2:
+        trimmed = slides[:target]
+    else:
+        trimmed = [slides[0]] + slides[1:target - 1] + [slides[-1]]
+    return PresentationStructure(slides=trimmed)
 
 
 class EpisodePlan(BaseModel):

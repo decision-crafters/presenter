@@ -3,6 +3,7 @@ import argparse
 import json
 import os
 import sys
+from typing import Optional
 
 from dotenv import load_dotenv
 
@@ -90,7 +91,16 @@ async def main():
         "--slides",
         type=int,
         default=None,
-        help="Target number of slides / ~15 min of content (default 15; longer is fine)",
+        help=(
+            "Target number of content slides (default 15). Sources/CTA/References/"
+            "Demo slides are appended separately. Use --slides-strict to enforce "
+            "the exact count."
+        ),
+    )
+    parser.add_argument(
+        "--slides-strict",
+        action="store_true",
+        help="Enforce --slides exactly: pin the schema and trim excess slides.",
     )
     parser.add_argument(
         "--series",
@@ -253,6 +263,7 @@ async def main():
     workflow = PresenterWorkflow(
         llm=llm,
         target_slides=args.slides,
+        strict_slides=args.slides_strict,
         guide=steering,
         design=design,
         # Splitting diagrams onto their own slide changes the slide count, which
@@ -311,11 +322,15 @@ async def main():
 
     # A stable, machine-readable line so any caller (agent or script) can locate
     # the outputs without parsing the human-readable log.
-    result = build_result(presentation_dir, args.export_video, args.youtube)
+    result = build_result(presentation_dir, args.export_video, args.youtube,
+                          slides_requested=args.slides)
     print("PRESENTER_RESULT " + json.dumps(result))
 
 
-def build_result(presentation_dir: str, export_video: bool, youtube: bool) -> dict:
+def build_result(
+    presentation_dir: str, export_video: bool, youtube: bool,
+    slides_requested: Optional[int] = None,
+) -> dict:
     """The stable PRESENTER_RESULT dict, derived from files on disk.
 
     ``captions`` and ``youtube`` list the files that actually exist, so callers
@@ -342,6 +357,14 @@ def build_result(presentation_dir: str, export_video: bool, youtube: bool) -> di
             path = os.path.join(youtube_dir, name)
             if os.path.exists(path):
                 kit_files[key] = path
+    slides_actual = None
+    structure_file = os.path.join(presentation_dir, "structure.json")
+    if os.path.exists(structure_file):
+        try:
+            with open(structure_file) as f:
+                slides_actual = len(json.load(f).get("slides", []))
+        except (json.JSONDecodeError, OSError):
+            slides_actual = None
     return {
         "presentation_dir": presentation_dir,
         "html": os.path.join(presentation_dir, "output", "index.html"),
@@ -349,6 +372,7 @@ def build_result(presentation_dir: str, export_video: bool, youtube: bool) -> di
         "mp4": mp4 if (export_video and os.path.exists(mp4)) else None,
         "captions": caption_files or None,
         "youtube": kit_files or None,
+        "slides": {"requested": slides_requested, "actual": slides_actual},
     }
 
 

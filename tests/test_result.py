@@ -1,3 +1,4 @@
+import json
 import os
 import tempfile
 
@@ -56,3 +57,18 @@ def test_result_no_video():
         assert result["mp4"] is None
         assert result["captions"] is None
         assert result["youtube"] is None
+
+
+def test_result_slides_field():
+    with tempfile.TemporaryDirectory() as d:
+        with open(os.path.join(d, "structure.json"), "w") as f:
+            json.dump(
+                {"slides": [{"title": "a", "atomic_core_idea": "x"} for _ in range(4)]},
+                f,
+            )
+        result = build_result(d, False, False, slides_requested=6)
+        assert result["slides"] == {"requested": 6, "actual": 4}
+
+    with tempfile.TemporaryDirectory() as d:
+        result = build_result(d, False, False)
+        assert result["slides"] == {"requested": None, "actual": None}

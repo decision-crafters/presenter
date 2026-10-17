@@ -5,7 +5,7 @@ from llama_index.core import Document
 from llama_index.core.prompts.base import PromptTemplate
 
 
-from models import PresentationStructureWithTitle
+from models import PresentationStructureWithTitle, make_structure_model
 from guide import format_steering
 
 PRESENTATION_FROM_DATA_PROMPT = """
@@ -40,7 +40,8 @@ Build the presentation ONLY from this source material:
 
 
 def create_presentation_structure_from_data(
-    docs: List[Document], llm: LLM, target_slides: int = 15, guide: str = ""
+    docs: List[Document], llm: LLM, target_slides: int = 15, guide: str = "",
+    strict: bool = False,
 ) -> PresentationStructureWithTitle:
     print("\n> Creating presentation structure from existing data...\n")
     source_text = "\n\n".join(d.text for d in docs)
@@ -52,7 +53,7 @@ def create_presentation_structure_from_data(
     )
     prompt = PromptTemplate(instructions)
     return llm.structured_predict(
-        PresentationStructureWithTitle,
+        make_structure_model(True, target_slides if strict else None),
         prompt=prompt,
         source_text=source_text,
         steering=format_steering(guide),
