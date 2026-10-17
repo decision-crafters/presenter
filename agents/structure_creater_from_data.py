@@ -1,12 +1,10 @@
-from typing import List
 
-from llama_index.core.llms.llm import LLM
 from llama_index.core import Document
+from llama_index.core.llms.llm import LLM
 from llama_index.core.prompts.base import PromptTemplate
 
-
-from models import PresentationStructureWithTitle, make_structure_model
 from guide import format_steering
+from models import PresentationStructureWithTitle, make_structure_model
 
 PRESENTATION_FROM_DATA_PROMPT = """
 The key to creating a perfect presentation is following:
@@ -40,7 +38,7 @@ Build the presentation ONLY from this source material:
 
 
 def create_presentation_structure_from_data(
-    docs: List[Document], llm: LLM, target_slides: int = 15, guide: str = "",
+    docs: list[Document], llm: LLM, target_slides: int = 15, guide: str = "",
     strict: bool = False,
 ) -> PresentationStructureWithTitle:
     print("\n> Creating presentation structure from existing data...\n")

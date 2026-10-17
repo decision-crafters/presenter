@@ -1,9 +1,8 @@
 from llama_index.core.llms.llm import LLM
 from llama_index.core.prompts.base import PromptTemplate
 
-
-from models import Slide, SlideInfo
 from guide import format_steering
+from models import Slide, SlideInfo
 
 COMPOSE_SLIDE_PROMPT = """
 The key to creating a perfect slide for a presentation is following:

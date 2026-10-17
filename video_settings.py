@@ -17,7 +17,7 @@ repo-deck outro), the end-screen hold, and the video resolution live here; #10
 import os
 import re
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Optional
 
 DEFAULT_HOLD_SECONDS = 4.0
 
@@ -41,7 +41,7 @@ DEFAULT_CLOSING_LINE = (
 )
 
 
-def parse_resolution(value, default: Tuple[int, int] = DEFAULT_RESOLUTION) -> Tuple[int, int]:
+def parse_resolution(value, default: tuple[int, int] = DEFAULT_RESOLUTION) -> tuple[int, int]:
     """Normalize a size to an even ``(width, height)`` pair.
 
     Accepts a name (``"1080p"``), a ``"WIDTHxHEIGHT"`` string, or a
@@ -74,7 +74,7 @@ def parse_resolution(value, default: Tuple[int, int] = DEFAULT_RESOLUTION) -> Tu
 class VideoSettings:
     closing_line: str = DEFAULT_CLOSING_LINE
     hold_seconds: float = DEFAULT_HOLD_SECONDS
-    resolution: Tuple[int, int] = DEFAULT_RESOLUTION
+    resolution: tuple[int, int] = DEFAULT_RESOLUTION
     watermark: Optional["WatermarkSettings"] = None
 
 
@@ -86,7 +86,7 @@ class WatermarkSettings:
     warning). ``height`` is in pixels at the 1080p reference and scales with the
     render resolution.
     """
-    image: Optional[str] = None
+    image: str | None = None
     position: str = "bottom-right"
     height: int = 64
 
@@ -131,7 +131,7 @@ def video_settings(design) -> VideoSettings:
     )
 
 
-def _resolve_watermark(design, raw) -> Optional[WatermarkSettings]:
+def _resolve_watermark(design, raw) -> WatermarkSettings | None:
     """Build a WatermarkSettings from ``video.watermark`` (or None when disabled).
 
     The bug image defaults to the design's ``logo`` token (the same asset used on
@@ -162,7 +162,7 @@ def _resolve_watermark(design, raw) -> Optional[WatermarkSettings]:
     )
 
 
-def watermark_issue(watermark: Optional[WatermarkSettings]) -> Optional[str]:
+def watermark_issue(watermark: WatermarkSettings | None) -> str | None:
     """Why a *configured* watermark can't be overlaid, or None.
 
     ``None`` means "nothing to warn about": either no watermark was configured at

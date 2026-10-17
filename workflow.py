@@ -1,60 +1,58 @@
+import json
 import os
 import re
-import json
 import shutil
 import subprocess
 import time
 import urllib.request
-from typing import Any, List, Optional
+from typing import Any, cast
 
 from llama_index.core.llms.llm import LLM
 from llama_index.core.workflow import (
-    step,
     Context,
-    Workflow,
     Event,
     StartEvent,
     StopEvent,
+    Workflow,
+    step,
 )
 from llama_index.core.workflow.retry_policy import ConstantDelayRetryPolicy
 
+from agents.demo_narrator import write_demo_walkthrough
+from agents.slide_maker import compose_slide
+from agents.structure_creater import create_presentation_structure
+from agents.structure_creater_from_data import create_presentation_structure_from_data
+from agents.structure_updater import update_presentation_structure
+from agents.structure_validator import validate_presentation_structure
+from design import Design, apply_branding, mermaid_config, reveal_config_lines
+from images import MAX_IMAGES, POLLINATIONS_DELAY, fetch_slide_image
+from ingest import (
+    extract_demo_media,
+    extract_reference_urls,
+    extract_source_citations,
+    fetch_repo_tape,
+    load_source_documents,
+)
 from models import (
     PresentationStructure,
-    StructureFeedback,
-    Slide,
     SlideInfo,
+    StructureFeedback,
     enforce_slide_count,
     load_structure,
     save_structure,
     structure_cache_path,
 )
-from agents.structure_creater import create_presentation_structure
-from agents.structure_validator import validate_presentation_structure
-from agents.structure_updater import update_presentation_structure
-from agents.slide_maker import compose_slide
-from agents.structure_creater_from_data import create_presentation_structure_from_data
-from ingest import (
-    load_source_documents,
-    extract_reference_urls,
-    extract_source_citations,
-    extract_demo_media,
-    fetch_repo_tape,
-)
-from agents.demo_narrator import write_demo_walkthrough
-from design import Design, reveal_config_lines, apply_branding, mermaid_config
-from video_settings import video_settings
-from images import fetch_slide_image, POLLINATIONS_DELAY, MAX_IMAGES
 from utils import (
-    get_safe_foldername,
-    sanitize_markdown,
-    split_oversized_diagrams,
-    references_slide,
-    demo_slides,
     cta_slide,
-    sources_slide,
+    demo_slides,
+    get_safe_foldername,
+    references_slide,
     render_mermaid_blocks,
+    sanitize_markdown,
+    sources_slide,
+    split_oversized_diagrams,
 )
-
+from video_settings import video_settings
 
 _DEMO_MAX_BYTES = 25 * 1024 * 1024  # skip absurdly large demo downloads
 
@@ -65,7 +63,7 @@ def _media_seconds(path: str) -> float:
         r = subprocess.run(
             ["ffprobe", "-v", "error", "-show_entries", "format=duration",
              "-of", "json", path],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            capture_output=True, text=True,
         )
         if r.returncode != 0:
             return 0.0
@@ -78,7 +76,7 @@ def _fetch_demo_media(url: str, media_dir: str):
     """Download an http(s) demo recording, or copy a local path, into
     ``media_dir``. Returns the media basename, or ``None`` on any failure (a
     missing demo must never break the deck)."""
-    base = os.path.basename(re.split(r"[?#]", url, 1)[0]) or "demo"
+    base = os.path.basename(re.split(r"[?#]", url, maxsplit=1)[0]) or "demo"
     base = re.sub(r"[^A-Za-z0-9._-]", "_", base)
     if not os.path.splitext(base)[1]:
         base += ".gif"
@@ -137,7 +135,7 @@ class SlideCreated(Event):
     slide_index: int
     content: str
     narration: str
-    image_query: Optional[str] = None
+    image_query: str | None = None
 
 
 def _venv_tool(name: str) -> str:
@@ -157,12 +155,12 @@ class PresenterWorkflow(Workflow):
         target_slides: int = 15,
         strict_slides: bool = False,
         guide: str = "",
-        design: Optional[Design] = None,
+        design: Design | None = None,
         split_diagrams: bool = True,
-        images_provider: Optional[str] = None,
-        presentation_folder: Optional[str] = None,
-        title: Optional[str] = None,
-        source_focus: Optional[List[str]] = None,
+        images_provider: str | None = None,
+        presentation_folder: str | None = None,
+        title: str | None = None,
+        source_focus: list[str] | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
@@ -288,7 +286,7 @@ class PresenterWorkflow(Workflow):
     @step
     async def create_slides(
         self, ctx: Context, ev: StructureFinalized
-    ) -> ComposeSlideRequestReceived:
+    ) -> ComposeSlideRequestReceived | None:
         structure = ev.structure
         if self.strict_slides:
             structure = enforce_slide_count(structure, self.target_slides)
@@ -304,6 +302,7 @@ class PresenterWorkflow(Workflow):
             ctx.send_event(
                 ComposeSlideRequestReceived(slide_index=slide_index, slide_info=slide)
             )
+        return None
 
     @step(num_workers=6, retry_policy=ConstantDelayRetryPolicy())
     async def compose_one_slide(
@@ -320,13 +319,13 @@ class PresenterWorkflow(Workflow):
         narration_file = os.path.join(slide_folder, "narration.txt")
         image_query_file = os.path.join(slide_folder, "image_query.txt")
         if os.path.exists(content_file) and os.path.exists(narration_file):
-            with open(content_file, "r") as f:
+            with open(content_file) as f:
                 content = f.read()
-            with open(narration_file, "r") as f:
+            with open(narration_file) as f:
                 narration = f.read()
             image_query = None
             if os.path.exists(image_query_file):
-                with open(image_query_file, "r") as f:
+                with open(image_query_file) as f:
                     image_query = f.read().strip() or None
             return SlideCreated(
                 slide_index=slide_index,
@@ -336,7 +335,7 @@ class PresenterWorkflow(Workflow):
             )
         topic = await ctx.store.get("topic")
         structure = await ctx.store.get("structure")
-        slides_info: List[SlideInfo] = structure.slides
+        slides_info: list[SlideInfo] = structure.slides
         num_slides = await ctx.store.get("num_slides")
         prev_next_info = ""
         if slide_index > 0:
@@ -401,14 +400,14 @@ class PresenterWorkflow(Workflow):
         return result
 
     @step
-    async def combine_slides(self, ctx: Context, ev: SlideCreated) -> StopEvent:
+    async def combine_slides(self, ctx: Context, ev: SlideCreated) -> StopEvent | None:
         num_slides = await ctx.store.get("num_slides")
         presentation_folder = await ctx.store.get("presentation_folder")
         events = ctx.collect_events(ev, [SlideCreated] * num_slides)
         if events is None:
             return None
 
-        slide_created_events: List[SlideCreated] = events
+        slide_created_events = cast(list[SlideCreated], events)
         media_dir = os.path.join(presentation_folder, "media")
         os.makedirs(media_dir, exist_ok=True)
         image_md = self._fetch_slide_images(slide_created_events, media_dir)
@@ -446,7 +445,7 @@ class PresenterWorkflow(Workflow):
                 render_mermaid_blocks(full_presentation_template, media_dir, config_path)
             )
 
-        with open(presentation_file, "r") as f:
+        with open(presentation_file) as f:
             presentation_content = f.read()
         with open(presentation_file, "w") as f:
             f.write(sanitize_markdown(presentation_content))
@@ -491,7 +490,7 @@ class PresenterWorkflow(Workflow):
         # slide, then append Demo slides, a "Get the Code" CTA, and a References
         # slide (all after the structure slides, so per-slide narration stays in
         # sync for --export-video).
-        with open(presentation_file, "r") as f:
+        with open(presentation_file) as f:
             deck_md = f.read()
         if self.split_diagrams:
             deck_md = split_oversized_diagrams(deck_md, media_dir)

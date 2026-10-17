@@ -23,7 +23,6 @@ import json
 import os
 import re
 import subprocess
-from typing import List, Optional, Tuple
 
 MAX_LINE_CHARS = 42   # characters per caption line (subtitle ceiling)
 MIN_CUE_SECS = 1.0    # a cue shorter than this would flash; floor it
@@ -31,7 +30,7 @@ MAX_CUE_SECS = 7.0    # a cue longer than this overstays on a still frame
 ORPHAN_WORDS = 2      # a trailing line of <= this many words is merged upward
 
 # A caption event: (start_seconds, end_seconds, text).
-Caption = Tuple[float, float, str]
+Caption = tuple[float, float, str]
 
 # Punctuation a caption line may end on (kept with the fragment it closes).
 _CLAUSE_END = re.compile(r"[,;:—–.!?]$")
@@ -51,13 +50,13 @@ def _duration(path: str) -> float:
         return 0.0
 
 
-def _wrap_lines(words: List[str], max_line: int = MAX_LINE_CHARS) -> List[str]:
+def _wrap_lines(words: list[str], max_line: int = MAX_LINE_CHARS) -> list[str]:
     """Word-wrap ``words`` into lines of ``<= max_line`` characters.
 
     Breaks at word boundaries, preferring a break right after clause punctuation
     once a line is about half full, and guarantees the final line holds more than
     ``ORPHAN_WORDS`` words by pulling words back from the previous line."""
-    lines: List[str] = []
+    lines: list[str] = []
     line = ""
     for word in words:
         if not line:
@@ -89,14 +88,14 @@ def _wrap_lines(words: List[str], max_line: int = MAX_LINE_CHARS) -> List[str]:
     return lines
 
 
-def _split_captions(text: str) -> List[str]:
+def _split_captions(text: str) -> list[str]:
     """Split narration prose into caption cues (at most two lines of at most
     ``MAX_LINE_CHARS`` characters each), breaking at clause/word boundaries and
     merging any orphan one/two-word tail into the previous line."""
     words = [w for w in re.split(r"\s+", (text or "").strip()) if w]
     lines = _wrap_lines(words)
 
-    cues: List[str] = []
+    cues: list[str] = []
     i = 0
     while i < len(lines):
         if i + 1 < len(lines):
@@ -108,7 +107,7 @@ def _split_captions(text: str) -> List[str]:
     return cues
 
 
-def _reconcile_durations(durations: List[float], total: float) -> List[float]:
+def _reconcile_durations(durations: list[float], total: float) -> list[float]:
     """Clamp each cue to ``[MIN_CUE_SECS, MAX_CUE_SECS]`` and nudge values so they
     still sum to ``total`` (bounded passes; converges on realistic inputs)."""
     lo, hi = MIN_CUE_SECS, MAX_CUE_SECS
@@ -129,7 +128,7 @@ def _reconcile_durations(durations: List[float], total: float) -> List[float]:
     return ds
 
 
-def _timed_chunks(start: float, duration: float, chunks: List[str]) -> List[Caption]:
+def _timed_chunks(start: float, duration: float, chunks: list[str]) -> list[Caption]:
     """Spread ``chunks`` across ``[start, start+duration]``, each sized by its
     character count (longer text -> more screen time), floored at MIN_CUE_SECS and
     capped at MAX_CUE_SECS, pinned so the last cue ends with the clip."""
@@ -141,9 +140,9 @@ def _timed_chunks(start: float, duration: float, chunks: List[str]) -> List[Capt
     durations = _reconcile_durations(
         [duration * n / total for n in lengths], duration
     )
-    out: List[Caption] = []
+    out: list[Caption] = []
     t = start
-    for text, d in zip(chunks, durations):
+    for text, d in zip(chunks, durations, strict=True):
         out.append((t, t + d, text))
         t += d
     # Pin the last cue to the clip end exactly (a no-op when durations already
@@ -155,8 +154,8 @@ def _timed_chunks(start: float, duration: float, chunks: List[str]) -> List[Capt
     return out
 
 
-def _clip_narration(presentation_dir: str, rel: str, demos: List[dict],
-                    closing: Optional[dict]) -> Optional[str]:
+def _clip_narration(presentation_dir: str, rel: str, demos: list[dict],
+                    closing: dict | None) -> str | None:
     """The spoken text for one entry in clips.txt, or None."""
     m = re.match(r"slide_(\d+)/clip\.mp4$", rel)
     if m:
@@ -188,26 +187,26 @@ def _fmt_vtt(seconds: float) -> str:
     return _fmt_srt(seconds).replace(",", ".")
 
 
-def _to_srt(captions: List[Caption]) -> str:
+def _to_srt(captions: list[Caption]) -> str:
     blocks = []
     for i, (s, e, text) in enumerate(captions, start=1):
         blocks.append(f"{i}\n{_fmt_srt(s)} --> {_fmt_srt(e)}\n{text}\n")
     return "\n".join(blocks)
 
 
-def _to_vtt(captions: List[Caption]) -> str:
+def _to_vtt(captions: list[Caption]) -> str:
     blocks = [f"{_fmt_vtt(s)} --> {_fmt_vtt(e)}\n{text}" for s, e, text in captions]
     return "\n\n".join(blocks) + "\n"
 
 
-def build_captions(presentation_dir: str) -> Tuple[str, str]:
+def build_captions(presentation_dir: str) -> tuple[str, str]:
     """Return (srt, vtt) caption text for the rendered video."""
     clips_file = os.path.join(presentation_dir, "clips.txt")
     if not os.path.exists(clips_file):
         raise SystemExit(
             f"No clips.txt in {presentation_dir}: render the video first (--export-video)."
         )
-    demos = []
+    demos: list = []
     demos_file = os.path.join(presentation_dir, "demos.json")
     if os.path.exists(demos_file):
         try:
@@ -223,7 +222,7 @@ def build_captions(presentation_dir: str) -> Tuple[str, str]:
             closing = None
 
     rels = re.findall(r"file '([^']+)'", open(clips_file).read())
-    captions: List[Caption] = []
+    captions: list[Caption] = []
     t = 0.0
     for rel in rels:
         dur = _duration(os.path.join(presentation_dir, rel))
@@ -235,7 +234,7 @@ def build_captions(presentation_dir: str) -> Tuple[str, str]:
     return _to_srt(captions), "WEBVTT\n\n" + _to_vtt(captions)
 
 
-def write_captions(presentation_dir: str) -> List[str]:
+def write_captions(presentation_dir: str) -> list[str]:
     """Write captions.srt and captions.vtt; returns the written paths."""
     srt, vtt = build_captions(presentation_dir)
     paths = []

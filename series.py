@@ -27,7 +27,6 @@ import os
 import re
 import sys
 from datetime import datetime
-from typing import List, Optional
 
 SERIES_DIR = "series"
 PRESENTATIONS_DIR = "presentations"
@@ -52,7 +51,7 @@ def series_slug(source: str) -> str:
 def load_series(path: str) -> dict:
     import yaml
 
-    with open(path, "r") as f:
+    with open(path) as f:
         data = yaml.safe_load(f) or {}
     data.setdefault("episodes", [])
     data["_path"] = path
@@ -138,7 +137,7 @@ def episode_status(series: dict, ep: dict) -> str:
     return "planned"
 
 
-def next_step(series: dict, ep: dict, status: str) -> Optional[str]:
+def next_step(series: dict, ep: dict, status: str) -> str | None:
     path, eid = series["_path"], ep["id"]
     if status in ("planned", "in progress"):
         return f"python run.py --series {path} --episode {eid} --export-video"
@@ -151,7 +150,7 @@ def next_step(series: dict, ep: dict, status: str) -> Optional[str]:
     return None
 
 
-def collect(series_dir: str = SERIES_DIR) -> List[dict]:
+def collect(series_dir: str = SERIES_DIR) -> list[dict]:
     """Every series with each episode's derived status."""
     result = []
     for path in sorted(glob.glob(os.path.join(series_dir, "*.yaml"))):
@@ -167,7 +166,7 @@ def collect(series_dir: str = SERIES_DIR) -> List[dict]:
     return result
 
 
-def unfiled_decks(all_series: List[dict]) -> List[str]:
+def unfiled_decks(all_series: list[dict]) -> list[str]:
     """Decks in presentations/ that no series tracks (candidates to adopt)."""
     tracked = {
         os.path.normpath(ep["_folder"]) for s in all_series for ep in s["episodes"]
@@ -181,7 +180,7 @@ def unfiled_decks(all_series: List[dict]) -> List[str]:
     return out
 
 
-def brief(all_series: List[dict]) -> str:
+def brief(all_series: list[dict]) -> str:
     """Short plain-text summary for session start; empty when nothing is open."""
     open_lines = []
     for s in all_series:
@@ -238,7 +237,7 @@ def _rel(target: str, base_dir: str) -> str:
     return os.path.relpath(target, base_dir).replace(os.sep, "/")
 
 
-def render_html(all_series: List[dict], out_path: str) -> str:
+def render_html(all_series: list[dict], out_path: str) -> str:
     base = os.path.dirname(os.path.abspath(out_path))
     esc = html.escape
     parts = []

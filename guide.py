@@ -13,13 +13,12 @@ render exactly as they do today.
 """
 
 import os
-from typing import Optional
 
 # Files auto-discovered in the project root when --guide is not given.
 AUTO_DISCOVERY_NAMES = ("AGENT.md", "SKILL.md")
 
 
-def _split_frontmatter(text: str) -> tuple[Optional[str], str]:
+def _split_frontmatter(text: str) -> tuple[str | None, str]:
     """Return (frontmatter_yaml_or_None, body). Handles a leading ``---`` fence."""
     lines = text.splitlines()
     i = 0
@@ -34,7 +33,7 @@ def _split_frontmatter(text: str) -> tuple[Optional[str], str]:
     return None, text.strip()
 
 
-def _guide_name(frontmatter: Optional[str]) -> Optional[str]:
+def _guide_name(frontmatter: str | None) -> str | None:
     if not frontmatter:
         return None
     try:
@@ -64,7 +63,7 @@ def _resolve_file(path: str) -> str:
     return path
 
 
-def load_guide(path: Optional[str] = None) -> str:
+def load_guide(path: str | None = None) -> str:
     """Load the steering body from a guide file.
 
     ``path`` explicit -> must exist (fail loudly). ``path`` None -> auto-discover
@@ -76,12 +75,12 @@ def load_guide(path: Optional[str] = None) -> str:
             raise FileNotFoundError(f"Guide file not found: {resolved}")
     else:
         resolved = next(
-            (n for n in AUTO_DISCOVERY_NAMES if os.path.exists(n)), None
+            (n for n in AUTO_DISCOVERY_NAMES if os.path.exists(n)), ""
         )
-        if resolved is None:
+        if not resolved:
             return ""
 
-    with open(resolved, "r") as f:
+    with open(resolved) as f:
         text = f.read()
 
     frontmatter, body = _split_frontmatter(text)

@@ -5,15 +5,15 @@ from PIL import Image, ImageFont
 
 import youtube
 from youtube import (
-    build_description,
-    channel_settings,
-    youtube_settings,
     YouTubeSettings,
     _clip_label,
     _font_has_glyph,
     _sanitize_thumbnail_text,
+    build_description,
+    channel_settings,
     compute_chapters,
     render_thumbnail,
+    youtube_settings,
 )
 
 

@@ -1,21 +1,20 @@
-import asyncio
 import argparse
+import asyncio
 import json
 import os
 import sys
-from typing import Optional
 
 from dotenv import load_dotenv
 
-from providers import build_llm
-from guide import load_guide
-from design import load_design
-from persona import load_persona, select_persona, open_persona_gap_issue
-from images import resolve_image_provider
-from series import load_series, get_episode, episode_folder, episode_steering
-from workflow import PresenterWorkflow
 from agents.video_creator import PresenterVideoCreaterWorkflow
-from video_settings import video_settings, parse_resolution
+from design import load_design
+from guide import load_guide
+from images import resolve_image_provider
+from persona import load_persona, open_persona_gap_issue, select_persona
+from providers import build_llm
+from series import episode_folder, episode_steering, get_episode, load_series
+from video_settings import parse_resolution, video_settings
+from workflow import PresenterWorkflow
 
 # Local models are much slower than the OpenAI cloud, so give the workflows a
 # generous timeout (seconds) for structure generation and per-slide composition.
@@ -331,7 +330,7 @@ async def main():
 
 def build_result(
     presentation_dir: str, export_video: bool, youtube: bool,
-    slides_requested: Optional[int] = None,
+    slides_requested: int | None = None,
 ) -> dict:
     """The stable PRESENTER_RESULT dict, derived from files on disk.
 

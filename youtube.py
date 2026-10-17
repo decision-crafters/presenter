@@ -36,7 +36,6 @@ import os
 import re
 import subprocess
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
 
 from models import load_structure
 
@@ -60,11 +59,11 @@ class YouTubeSettings:
     a brand's footer/link CTA stays the only call to action); ``links`` are extra
     description links as ``(label, url)`` pairs.
     """
-    category: Optional[int] = None
-    language: Optional[str] = None
-    subscribe: Optional[str] = None
+    category: int | None = None
+    language: str | None = None
+    subscribe: str | None = None
     description_footer: str = ""
-    links: List[Tuple[str, str]] = field(default_factory=list)
+    links: list[tuple[str, str]] = field(default_factory=list)
 
 
 def youtube_settings(design) -> YouTubeSettings:
@@ -83,7 +82,7 @@ def youtube_settings(design) -> YouTubeSettings:
     subscribe = (yt.get("subscribe") or "").strip() or None
     footer = (yt.get("descriptionFooter") or yt.get("description_footer") or "").strip()
 
-    links: List[Tuple[str, str]] = []
+    links: list[tuple[str, str]] = []
     for item in yt.get("links") or []:
         if isinstance(item, str):
             label, url = "", item.strip()
@@ -141,12 +140,12 @@ def _duration(path: str) -> float:
         return 0.0
 
 
-def _slide_titles(presentation_dir: str) -> List[str]:
+def _slide_titles(presentation_dir: str) -> list[str]:
     structure = load_structure(presentation_dir)
     return [s.title for s in structure.slides]
 
 
-def _clip_label(rel: str, titles: List[str], demos: List[dict],
+def _clip_label(rel: str, titles: list[str], demos: list[dict],
                 closing_title: str = "Get the Code") -> str:
     m = re.match(r"slide_(\d+)/clip\.mp4$", rel)
     if m and int(m.group(1)) < len(titles):
@@ -168,13 +167,13 @@ def _fmt_ts(secs: float) -> str:
     return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
 
 
-def compute_chapters(presentation_dir: str) -> List[dict]:
+def compute_chapters(presentation_dir: str) -> list[dict]:
     """[{start, title}] in video order; short clips fold into the previous chapter."""
     clips_file = os.path.join(presentation_dir, "clips.txt")
     if not os.path.exists(clips_file):
         raise SystemExit(f"No clips.txt in {presentation_dir}: render the video first (--export-video).")
     titles = _slide_titles(presentation_dir)
-    demos = []
+    demos: list = []
     demos_file = os.path.join(presentation_dir, "demos.json")
     if os.path.exists(demos_file):
         with open(demos_file) as f:
@@ -191,7 +190,8 @@ def compute_chapters(presentation_dir: str) -> List[dict]:
             pass
     rels = re.findall(r"file '([^']+)'", open(clips_file).read())
 
-    chapters, t = [], 0.0
+    chapters: list = []
+    t = 0.0
     for rel in rels:
         dur = _duration(os.path.join(presentation_dir, rel))
         # YouTube rejects chapters under 10 s: a short clip folds into the one before.
@@ -229,7 +229,7 @@ Video context:
 """
 
 
-def _video_context(presentation_dir: str, series: Optional[dict], ep: Optional[dict]) -> str:
+def _video_context(presentation_dir: str, series: dict | None, ep: dict | None) -> str:
     structure = load_structure(presentation_dir)
     parts = []
     if series and ep:
@@ -264,8 +264,9 @@ def generate_wording(presentation_dir, llm, steering, series=None, ep=None):
     )
 
 
-def _clean_tags(tags: List[str]) -> List[str]:
-    out, total = [], 0
+def _clean_tags(tags: list[str]) -> list[str]:
+    out: list[str] = []
+    total = 0
     for t in tags:
         t = t.strip().strip("#")
         if not t or len(t) > TAG_MAX or t.lower() in {x.lower() for x in out}:
@@ -277,8 +278,8 @@ def _clean_tags(tags: List[str]) -> List[str]:
     return out[:8]
 
 
-def _clean_hashtags(tags: List[str]) -> List[str]:
-    out = []
+def _clean_hashtags(tags: list[str]) -> list[str]:
+    out: list[str] = []
     for t in tags:
         t = "#" + re.sub(r"[^\w]", "", t.lstrip("#"))
         if len(t) > 1 and t.lower() not in {x.lower() for x in out}:
@@ -286,14 +287,16 @@ def _clean_hashtags(tags: List[str]) -> List[str]:
     return out[:3]
 
 
-def _is_http_url(value: Optional[str]) -> bool:
+def _is_http_url(value: str | None) -> bool:
     """True for an http(s) URL (a public repo/source), not a local path."""
-    return bool(value) and value.startswith(("http://", "https://"))
+    if value is None:
+        return False
+    return value.startswith(("http://", "https://"))
 
 
-def build_description(meta: dict, chapters: List[dict], source: Optional[str],
-                      series: Optional[dict], ep: Optional[dict],
-                      yt: Optional[YouTubeSettings] = None) -> str:
+def build_description(meta: dict, chapters: list[dict], source: str | None,
+                      series: dict | None, ep: dict | None,
+                      yt: YouTubeSettings | None = None) -> str:
     lines = [meta["hook"], "", meta["summary"].strip(), ""]
     if _is_http_url(source):
         lines.append(f"▶ Code: {source}")  # brand: the repo link comes first
@@ -316,7 +319,7 @@ def build_description(meta: dict, chapters: List[dict], source: Optional[str],
 
 # ---- thumbnail ----
 
-def _hex(color: Optional[str], default: str) -> str:
+def _hex(color: str | None, default: str) -> str:
     c = (color or default).strip()
     return c if c.startswith("#") else default
 
@@ -403,7 +406,7 @@ def _sanitize_thumbnail_text(text: str, font=None) -> str:
     return "".join(out)
 
 
-def render_thumbnail(out_path: str, text: str, design, image_path: Optional[str]) -> str:
+def render_thumbnail(out_path: str, text: str, design, image_path: str | None) -> str:
     """Brand thumbnail: ground color, image faded in from the right, stacked bold
     words (last word in the accent color), and the logo bug in one corner."""
     from PIL import Image, ImageDraw
@@ -481,7 +484,7 @@ def render_thumbnail(out_path: str, text: str, design, image_path: Optional[str]
     return out_path
 
 
-def _thumbnail_image(presentation_dir: str, design) -> Optional[str]:
+def _thumbnail_image(presentation_dir: str, design) -> str | None:
     thumb = (design.tokens.get("thumbnail") or {}) if design else {}
     face = thumb.get("face")
     if face and design and design.source_dir and not os.path.isabs(face):
@@ -520,7 +523,7 @@ def _count(n: int, limit: int) -> str:
     return f'<span class="count {cls}">{n}/{limit}</span>'
 
 
-def render_page(out_path: str, meta: dict, description: str, chapters: List[dict]) -> None:
+def render_page(out_path: str, meta: dict, description: str, chapters: list[dict]) -> None:
     esc = html.escape
     tags_line = ", ".join(meta["tags"])
     fields = [
@@ -582,7 +585,7 @@ _UPLOAD_PLAN_TEMPLATE = os.path.join(
 )
 
 
-def write_upload_plan(presentation_dir: str, meta: dict, chapters: List[dict]) -> str:
+def write_upload_plan(presentation_dir: str, meta: dict, chapters: list[dict]) -> str:
     """Write a filled UPLOAD_PLAN.md into the deck's ``youtube/`` folder."""
     with open(_UPLOAD_PLAN_TEMPLATE) as f:
         text = f.read()
@@ -599,7 +602,7 @@ def write_upload_plan(presentation_dir: str, meta: dict, chapters: List[dict]) -
 
 def build_kit(presentation_dir: str, llm=None, design=None, steering: str = "",
               series=None, ep=None, source=None, force=False,
-              thumbnail_text: Optional[str] = None) -> str:
+              thumbnail_text: str | None = None) -> str:
     out_dir = os.path.join(presentation_dir, "youtube")
     os.makedirs(out_dir, exist_ok=True)
     meta_file = os.path.join(out_dir, "metadata.json")

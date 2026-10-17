@@ -13,7 +13,6 @@ Providers:
 
 import hashlib
 import os
-from typing import Optional
 from urllib.parse import quote
 
 IMAGE_W = 1024
@@ -26,19 +25,19 @@ MAX_IMAGES = 8  # cap fetches per deck
 _VALID = {"pollinations", "pexels", "picsum"}
 
 
-def resolve_image_provider(name: Optional[str]) -> Optional[str]:
+def resolve_image_provider(name: str | None) -> str | None:
     """Return a valid provider name, or None to keep the feature off."""
     name = (name or os.getenv("IMAGE_PROVIDER") or "").strip().lower()
     return name if name in _VALID else None
 
 
-def _seed_from(query: str, seed: Optional[int]) -> int:
+def _seed_from(query: str, seed: int | None) -> int:
     if seed is not None:
         return seed
     return int(hashlib.md5(query.encode()).hexdigest()[:8], 16)
 
 
-def _download(url: str, out_path: str, headers: Optional[dict] = None) -> bool:
+def _download(url: str, out_path: str, headers: dict | None = None) -> bool:
     import httpx
 
     with httpx.stream(
@@ -85,7 +84,7 @@ def _picsum(out_path: str, seed: int) -> bool:
 
 
 def fetch_slide_image(
-    query: str, provider: str, out_path: str, seed: Optional[int] = None
+    query: str, provider: str, out_path: str, seed: int | None = None
 ) -> bool:
     """Fetch one image for ``query`` to ``out_path``. Falls back to Picsum."""
     seed = _seed_from(query, seed)

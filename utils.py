@@ -87,7 +87,7 @@ def _render_one_diagram(code: str, png_path: str, config_path) -> "tuple[bool, s
     finally:
         os.remove(mmd_path)
     ok = r.returncode == 0 and os.path.exists(png_path)
-    err = next((l for l in r.stderr.splitlines() if "error" in l.lower()), r.stderr[:200])
+    err = next((line for line in r.stderr.splitlines() if "error" in line.lower()), r.stderr[:200])
     return ok, err.strip()
 
 
@@ -114,7 +114,7 @@ def render_mermaid_blocks(markdown: str, media_dir: str, config_path=None) -> st
         results = list(pool.map(lambda j: _render_one_diagram(j[0], j[1], config_path), jobs))
 
     out, last = [], 0
-    for i, (m, (ok, err)) in enumerate(zip(blocks, results)):
+    for i, (m, (ok, err)) in enumerate(zip(blocks, results, strict=True)):
         out.append(markdown[last : m.start()])
         if ok:
             out.append(f"![diagram](./media/diagram-{i + 1}.png)")
@@ -140,8 +140,8 @@ def _diagram_is_oversized(path: str) -> bool:
             w, h = im.size
     except Exception:
         return False
-    h = h / DIAGRAM_SCALE  # thresholds are in 1x pixels
-    return (h > 300 and h / max(w / DIAGRAM_SCALE, 1) > 1.1) or h > 560
+    h_scaled = h / DIAGRAM_SCALE  # thresholds are in 1x pixels
+    return (h_scaled > 300 and h_scaled / max(w / DIAGRAM_SCALE, 1) > 1.1) or h_scaled > 560
 
 
 def split_oversized_diagrams(markdown: str, media_dir: str) -> str:

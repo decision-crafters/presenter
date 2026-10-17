@@ -24,7 +24,6 @@ import os
 import re
 import shutil
 from dataclasses import dataclass, field
-from typing import Optional, Tuple
 
 from guide import _split_frontmatter
 from utils import get_presentation_config
@@ -44,29 +43,29 @@ _LOGO_POSITIONS = {
 class Design:
     tokens: dict = field(default_factory=dict)
     voice: str = ""
-    source_dir: Optional[str] = None  # dir of DESIGN.md, for resolving local assets
+    source_dir: str | None = None  # dir of DESIGN.md, for resolving local assets
 
     @property
     def is_empty(self) -> bool:
         return not self.tokens and not self.voice.strip()
 
 
-def load_design(path: Optional[str] = None) -> Design:
+def load_design(path: str | None = None) -> Design:
     """Load a DESIGN.md (file or dir containing one), or auto-discover the root."""
     if path:
         resolved = os.path.join(path, "DESIGN.md") if os.path.isdir(path) else path
         if not os.path.exists(resolved):
             raise FileNotFoundError(f"Design file not found: {resolved}")
     else:
-        resolved = "DESIGN.md" if os.path.exists("DESIGN.md") else None
-        if resolved is None:
+        if not os.path.exists("DESIGN.md"):
             return Design()
+        resolved = "DESIGN.md"
 
-    with open(resolved, "r") as f:
+    with open(resolved) as f:
         text = f.read()
     frontmatter, body = _split_frontmatter(text)
 
-    tokens = {}
+    tokens: dict = {}
     if frontmatter:
         try:
             import yaml
@@ -121,7 +120,7 @@ def _fonts(tokens: dict) -> dict:
     }
 
 
-def _resolve_asset(design: Design, value) -> Tuple[Optional[str], Optional[str]]:
+def _resolve_asset(design: Design, value) -> tuple[str | None, str | None]:
     """Return (href_in_output, local_source_to_copy_or_None)."""
     if not value:
         return None, None
@@ -135,7 +134,7 @@ def _resolve_asset(design: Design, value) -> Tuple[Optional[str], Optional[str]]
 
 # ---- render-side generation ----
 
-def reveal_config_lines(design: Optional[Design]) -> str:
+def reveal_config_lines(design: Design | None) -> str:
     """The `[comment]: # (...)` reveal config block, from design or defaults."""
     if not design or design.is_empty:
         return get_presentation_config()
@@ -164,10 +163,10 @@ def _mix(a: str, b: str, t: float) -> str:
         ra, rb = rgb(a), rgb(b)
     except ValueError:
         return a
-    return "#" + "".join(f"{round(x + (y - x) * t):02x}" for x, y in zip(ra, rb))
+    return "#" + "".join(f"{round(x + (y - x) * t):02x}" for x, y in zip(ra, rb, strict=True))
 
 
-def mermaid_config(design: Optional[Design]) -> Optional[dict]:
+def mermaid_config(design: Design | None) -> dict | None:
     """A mermaid-cli theme built from the brand colors, so diagrams match the
     slides instead of mermaid's default lavender-on-white. ``None`` (mermaid's
     defaults) when there is no design or it declares no colors."""
@@ -204,7 +203,7 @@ def mermaid_config(design: Optional[Design]) -> Optional[dict]:
     }
 
 
-def branding_head(design: Design, bg_ref: Optional[str] = None) -> str:
+def branding_head(design: Design, bg_ref: str | None = None) -> str:
     """`<link>`s for fonts plus a `<style>` overriding reveal CSS variables."""
     tokens = design.tokens
     colors = _colors(tokens)
@@ -281,7 +280,7 @@ def _layout_style(design: Design) -> str:
     )
 
 
-def _logo_div(design: Design, logo_ref: Optional[str]) -> str:
+def _logo_div(design: Design, logo_ref: str | None) -> str:
     if not logo_ref:
         return ""
     pos = _LOGO_POSITIONS.get(
@@ -294,7 +293,7 @@ def _logo_div(design: Design, logo_ref: Optional[str]) -> str:
     )
 
 
-def _footer_div(source: Optional[str]) -> str:
+def _footer_div(source: str | None) -> str:
     """A small fixed footer citing the source repo/URL on every slide. Only
     rendered for an http(s) source; a GitHub URL is shortened to ``host/owner/repo``."""
     if not source or not str(source).lower().startswith(("http://", "https://")):
@@ -311,7 +310,7 @@ def _footer_div(source: Optional[str]) -> str:
 
 
 def apply_branding(
-    output_dir: str, design: Optional[Design], source: Optional[str] = None
+    output_dir: str, design: Design | None, source: str | None = None
 ) -> None:
     """Fit diagrams to the slide, add a source footer, and (if a design is given)
     inject brand CSS, a logo, and any local assets. Always runs -- the
@@ -334,7 +333,7 @@ def apply_branding(
     head = _layout_style(design) + branding_head(design, bg_ref=bg_ref)
     overlay_html = _logo_div(design, logo_ref) + _footer_div(source)
 
-    with open(html_file, "r") as f:
+    with open(html_file) as f:
         html = f.read()
     if "</head>" in html:
         html = html.replace("</head>", head + "</head>", 1)

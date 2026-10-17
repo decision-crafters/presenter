@@ -1,9 +1,8 @@
 from llama_index.core.llms.llm import LLM
 from llama_index.core.prompts.base import PromptTemplate
 
-
-from models import PresentationStructure, make_structure_model
 from guide import format_steering
+from models import PresentationStructure, make_structure_model
 
 PRESENTATION_STRUCTURE_PROMPT = """
 The key to creating a perfect presentation is following:
