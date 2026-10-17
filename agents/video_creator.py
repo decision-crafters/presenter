@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Optional
 import subprocess
 import os
 import json
@@ -15,7 +15,7 @@ from llama_index.core.workflow.retry_policy import ConstantDelayRetryPolicy
 
 from models import PresentationStructure, load_structure, structure_cache_path
 from agents.narrator import narrate
-from video_settings import DEFAULT_RESOLUTION
+from video_settings import DEFAULT_RESOLUTION, WatermarkSettings, watermark_filter
 
 
 # Playback speed for the narration in the exported video. 1.0 = Kokoro's
@@ -90,6 +90,7 @@ class PresenterVideoCreaterWorkflow(Workflow):
         lang_code: str = "a",
         pronunciations: dict = None,
         resolution: tuple = DEFAULT_RESOLUTION,
+        watermark: Optional[WatermarkSettings] = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
@@ -97,6 +98,7 @@ class PresenterVideoCreaterWorkflow(Workflow):
         self.lang_code = lang_code
         # Persona pronunciation lexicon applied to narration/captions before TTS.
         self.pronunciations = pronunciations or {}
+        self.watermark = watermark
         # Target frame size; the deck's screenshots and demo clips are rendered
         # to match so the final `concat -c copy` needs no re-encode.
         self.width, self.height = resolution
@@ -326,5 +328,38 @@ class PresenterVideoCreaterWorkflow(Workflow):
                 f"ffmpeg concat failed: "
                 f"{(r.stderr or b'').decode(errors='ignore').strip()[-300:]}"
             )
+        if self._apply_watermark(presentation_video_file):
+            print("\n> Watermark overlay applied.\n")
         print(f'\n> Presentation video created: "open {presentation_video_file}"\n')
         return StopEvent(result="Presentation video created")
+
+    def _apply_watermark(self, video_file: str) -> bool:
+        """Overlay the configured corner bug onto ``video_file`` in place.
+
+        A no-op when no watermark is configured or its image can't be read (e.g.
+        a remote URL, which the renderer doesn't fetch). Returns True on success.
+        """
+        if (
+            not self.watermark
+            or not self.watermark.image
+            or not os.path.exists(self.watermark.image)
+        ):
+            return False
+        filt = watermark_filter(self.watermark, self.height)
+        tmp = video_file + ".wm.mp4"
+        r = subprocess.run(
+            [
+                "ffmpeg", "-y", "-i", video_file, "-i", self.watermark.image,
+                "-filter_complex", filt, "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                "-c:a", "copy", tmp,
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        if r.returncode != 0 or not os.path.exists(tmp):
+            print(
+                "\n! Watermark overlay failed; leaving the video un-watermarked.\n"
+            )
+            return False
+        os.replace(tmp, video_file)
+        return True

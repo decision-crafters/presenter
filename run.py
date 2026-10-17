@@ -248,7 +248,8 @@ async def main():
     voice = args.voice or persona.voice or "af_heart"
     lang = args.lang or persona.lang or "a"
     # Video size: --resolution > design's video.resolution > 1080p default.
-    resolution = parse_resolution(args.resolution, video_settings(design).resolution)
+    settings = video_settings(design)
+    resolution = parse_resolution(args.resolution, settings.resolution)
     # Guide body + DESIGN.md voice + persona tone merge into one steering block.
     steering = "\n\n".join(
         x
@@ -285,6 +286,7 @@ async def main():
             lang_code=lang,
             pronunciations=persona.pronunciations,
             resolution=resolution,
+            watermark=settings.watermark,
             verbose=False,
             timeout=WORKFLOW_TIMEOUT,
         )

@@ -6,6 +6,7 @@ from PIL import Image, ImageFont
 import youtube
 from youtube import (
     build_description,
+    channel_settings,
     youtube_settings,
     YouTubeSettings,
     _clip_label,
@@ -51,6 +52,22 @@ def test_no_design_is_empty_settings():
     assert youtube_settings(None).subscribe is None
     assert youtube_settings(None).category is None
     assert youtube_settings(None).description_footer == ""
+
+
+def test_channel_settings():
+    class _Design:
+        tokens = {"channel": {"name": "Tosin Talks Tech", "handle": "@tosintalkstech",
+                              "url": "https://youtube.com/@tosintalkstech"}}
+
+    ch = channel_settings(_Design())
+    assert ch.name == "Tosin Talks Tech"
+    assert ch.handle == "@tosintalkstech"
+    assert ch.url == "https://youtube.com/@tosintalkstech"
+
+
+def test_channel_settings_empty():
+    ch = channel_settings(None)
+    assert ch.name == "" and ch.handle == "" and ch.url == ""
 
 
 def test_single_cta_no_subscribe():

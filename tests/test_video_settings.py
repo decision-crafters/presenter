@@ -2,14 +2,17 @@ from dataclasses import dataclass
 
 from video_settings import (
     DEFAULT_RESOLUTION,
+    WatermarkSettings,
     parse_resolution,
     video_settings,
+    watermark_filter,
 )
 
 
 @dataclass
 class _Design:
     tokens: dict
+    source_dir: str = None
 
 
 def test_default_is_1080p():
@@ -43,3 +46,46 @@ def test_design_resolution_overrides_default():
     assert video_settings(d).resolution == (1280, 720)
     # no design / no video block -> default 1080p
     assert video_settings(None).resolution == DEFAULT_RESOLUTION
+
+
+def test_watermark_disabled_by_default():
+    assert video_settings(_Design({})).watermark is None
+    assert video_settings(_Design({"video": {}})).watermark is None
+    assert video_settings(_Design({"logo": "logo.png"})).watermark is None
+
+
+def test_watermark_uses_logo_by_default():
+    d = _Design({"logo": "logo.png", "video": {"watermark": {}}})
+    wm = video_settings(d).watermark
+    assert wm is not None
+    assert wm.image.endswith("logo.png")
+    assert wm.position == "bottom-right"
+    assert wm.height == 64
+
+
+def test_watermark_image_override_and_position():
+    d = _Design({
+        "logo": "logo.png",
+        "video": {"watermark": {"image": "bug.png", "position": "top-left", "height": 100}},
+    })
+    wm = video_settings(d).watermark
+    assert wm.image.endswith("bug.png")
+    assert wm.position == "top-left"
+    assert wm.height == 100
+
+
+def test_watermark_resolves_relative_to_source_dir():
+    d = _Design({"logo": "logo.png", "video": {"watermark": {}}}, source_dir="/brand")
+    assert video_settings(d).watermark.image == "/brand/logo.png"
+
+
+def test_watermark_filter_positions():
+    wm = WatermarkSettings(image="x.png")
+    f = watermark_filter(wm, 1080)
+    assert "scale=-1:64" in f
+    assert f.endswith("overlay=W-w-24:H-h-24")  # bottom-right default
+    assert watermark_filter(WatermarkSettings(image="x.png", position="top-left"), 1080).endswith("overlay=24:24")
+    assert watermark_filter(WatermarkSettings(image="x.png", position="top-right"), 1080).endswith("overlay=W-w-24:24")
+    assert watermark_filter(WatermarkSettings(image="x.png", position="bottom-left"), 1080).endswith("overlay=24:H-h-24")
+    # height scales with the render resolution
+    assert "scale=-1:32" in watermark_filter(WatermarkSettings(image="x.png", height=64), 540)
