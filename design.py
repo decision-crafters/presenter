@@ -330,7 +330,11 @@ def apply_branding(
         if src and os.path.exists(src):
             shutil.copy(src, os.path.join(output_dir, os.path.basename(src)))
 
-    head = _layout_style(design) + branding_head(design, bg_ref=bg_ref)
+    from layouts import layout_css
+
+    head = (
+        _layout_style(design) + branding_head(design, bg_ref=bg_ref) + layout_css(design)
+    )
     overlay_html = _logo_div(design, logo_ref) + _footer_div(source)
 
     with open(html_file) as f:
