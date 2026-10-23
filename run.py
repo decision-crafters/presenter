@@ -180,6 +180,13 @@ async def main():
         help="Target repo (owner/name) for --suggest-persona-issue; default: current repo.",
     )
     parser.add_argument(
+        "--layouts",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Let slides use layout archetypes (boundary, tradeoff, result) styled "
+        "from the brand (default: on; --no-layouts for the classic look)",
+    )
+    parser.add_argument(
         "--youtube",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -278,6 +285,7 @@ async def main():
         # would desync the per-slide narration used by --export-video.
         split_diagrams=not args.export_video,
         images_provider=resolve_image_provider(args.images),
+        layouts=args.layouts,
         presentation_folder=episode_folder(series, episode) if episode else None,
         title=episode["title"] if episode else None,
         source_focus=episode.get("focus") if episode else None,

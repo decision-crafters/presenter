@@ -33,6 +33,7 @@ from ingest import (
     fetch_repo_tape,
     load_source_documents,
 )
+from layouts import layouts_enabled, normalize_layout, tag_slide
 from models import (
     PresentationStructure,
     SlideInfo,
@@ -136,6 +137,7 @@ class SlideCreated(Event):
     content: str
     narration: str
     image_query: str | None = None
+    layout: str | None = None
 
 
 def _venv_tool(name: str) -> str:
@@ -161,6 +163,7 @@ class PresenterWorkflow(Workflow):
         presentation_folder: str | None = None,
         title: str | None = None,
         source_focus: list[str] | None = None,
+        layouts: bool = True,
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
@@ -171,6 +174,9 @@ class PresenterWorkflow(Workflow):
         self.design = design
         self.split_diagrams = split_diagrams
         self.images_provider = images_provider
+        # Slide layout archetypes (layouts.py): on unless --no-layouts or the
+        # DESIGN.md says `layouts: false`.
+        self.layouts = layouts_enabled(design, layouts)
         # A series episode (series.py) pins its folder and title so reruns land
         # in the same place instead of a folder named after an LLM-chosen title.
         self.presentation_folder = presentation_folder
@@ -318,6 +324,7 @@ class PresenterWorkflow(Workflow):
         content_file = os.path.join(slide_folder, "content.md")
         narration_file = os.path.join(slide_folder, "narration.txt")
         image_query_file = os.path.join(slide_folder, "image_query.txt")
+        layout_file = os.path.join(slide_folder, "layout.txt")
         if os.path.exists(content_file) and os.path.exists(narration_file):
             with open(content_file) as f:
                 content = f.read()
@@ -327,11 +334,16 @@ class PresenterWorkflow(Workflow):
             if os.path.exists(image_query_file):
                 with open(image_query_file) as f:
                     image_query = f.read().strip() or None
+            layout = None
+            if os.path.exists(layout_file):
+                with open(layout_file) as f:
+                    layout = normalize_layout(f.read())
             return SlideCreated(
                 slide_index=slide_index,
                 content=content,
                 narration=narration,
                 image_query=image_query,
+                layout=layout,
             )
         topic = await ctx.store.get("topic")
         structure = await ctx.store.get("structure")
@@ -349,10 +361,15 @@ class PresenterWorkflow(Workflow):
             self.llm,
             self.guide,
             images_enabled=bool(self.images_provider),
+            # The opening slide carries the hook; it keeps the default layout.
+            layouts_enabled=self.layouts and slide_index > 0,
         )
         content = slide.content
         narration = slide.narration
         image_query = (slide.image_query or "").strip() or None
+        # The opening slide carries the hook: never a layout, even if the model
+        # fills the field anyway (it is in the output schema on every call).
+        layout = normalize_layout(slide.layout) if self.layouts and slide_index > 0 else None
         with open(content_file, "w") as f:
             f.write(content)
         with open(narration_file, "w") as f:
@@ -360,11 +377,15 @@ class PresenterWorkflow(Workflow):
         if image_query:
             with open(image_query_file, "w") as f:
                 f.write(image_query)
+        if layout:
+            with open(layout_file, "w") as f:
+                f.write(layout)
         return SlideCreated(
             slide_index=slide_index,
             content=content,
             narration=narration,
             image_query=image_query,
+            layout=layout,
         )
 
     def _fetch_slide_images(self, events, media_dir):
@@ -413,7 +434,8 @@ class PresenterWorkflow(Workflow):
         image_md = self._fetch_slide_images(slide_created_events, media_dir)
         slides_dict = {
             ev.slide_index: (
-                f"{ev.content}{image_md.get(ev.slide_index, '')}"
+                f"{tag_slide(ev.content, ev.layout if self.layouts and ev.slide_index > 0 else None)}"
+                f"{image_md.get(ev.slide_index, '')}"
                 f"\n\nNote:\n{ev.narration}\n"
             )
             for ev in slide_created_events

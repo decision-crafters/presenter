@@ -2,6 +2,7 @@ from llama_index.core.llms.llm import LLM
 from llama_index.core.prompts.base import PromptTemplate
 
 from guide import format_steering
+from layouts import LAYOUT_INSTRUCTION
 from models import Slide, SlideInfo
 
 COMPOSE_SLIDE_PROMPT = """
@@ -21,7 +22,7 @@ now write the contents of that slide in markdown, the format must be valid markd
 <mermaid definition code here>
 ```
 Make sure the mermaid code is valid and error-free. Use simple diagram for ensure error-free.
-LESS IS MORE, keep the texts and diagram minimal so that they fit in one slide and don't look cluttered. You MUST ENSURE that one line does not have more than 7-8 words, this is very important for readability. Each line must be independent and COMPLETE. NEVER break in the middle of a line. Never add more than 2-3 lines(excluding diagram) per slide. Instead of too much text, prioritize using a nice minimal diagram. Do most of the explanation during narration. Try not to break the flow from previous slide or to the next slide during narration. The narration must explain the contents in the slide, but concise enough so that the audience is not bored. the narration must be under 20 seconds. Don't start the narration with "In this slide" or anything similar, just start with the content directly.{image_instruction}{steering}
+LESS IS MORE, keep the texts and diagram minimal so that they fit in one slide and don't look cluttered. You MUST ENSURE that one line does not have more than 7-8 words, this is very important for readability. Each line must be independent and COMPLETE. NEVER break in the middle of a line. Never add more than 2-3 lines(excluding diagram) per slide. Instead of too much text, prioritize using a nice minimal diagram. Do most of the explanation during narration. Try not to break the flow from previous slide or to the next slide during narration. The narration must explain the contents in the slide, but concise enough so that the audience is not bored. the narration must be under 20 seconds. Don't start the narration with "In this slide" or anything similar, just start with the content directly.{image_instruction}{layout_instruction}{steering}
 """
 
 IMAGE_INSTRUCTION = (
@@ -39,6 +40,7 @@ async def compose_slide(
     llm: LLM,
     guide: str = "",
     images_enabled: bool = False,
+    layouts_enabled: bool = False,
 ) -> Slide:
     title = slide_info.title
     core_idea = slide_info.atomic_core_idea
@@ -51,5 +53,6 @@ async def compose_slide(
         core_idea=core_idea,
         prev_next_info=prev_next_info,
         image_instruction=IMAGE_INSTRUCTION if images_enabled else "",
+        layout_instruction=LAYOUT_INSTRUCTION if layouts_enabled else "",
         steering=format_steering(guide),
     )

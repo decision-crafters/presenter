@@ -136,6 +136,10 @@ class Slide(BaseModel):
         None,
         description="Optional short search phrase or prompt for a supporting photo, only when a picture would strengthen the slide and it has no diagram",
     )
+    layout: str | None = Field(
+        None,
+        description="Optional layout name (boundary, tradeoff, result) when the slide follows that layout's shape; empty for the default layout",
+    )
 
 
 # ---- structure cache (JSON, migrated from a legacy pickle) ----
