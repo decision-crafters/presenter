@@ -367,7 +367,9 @@ class PresenterWorkflow(Workflow):
         content = slide.content
         narration = slide.narration
         image_query = (slide.image_query or "").strip() or None
-        layout = normalize_layout(slide.layout) if self.layouts else None
+        # The opening slide carries the hook: never a layout, even if the model
+        # fills the field anyway (it is in the output schema on every call).
+        layout = normalize_layout(slide.layout) if self.layouts and slide_index > 0 else None
         with open(content_file, "w") as f:
             f.write(content)
         with open(narration_file, "w") as f:
@@ -432,7 +434,7 @@ class PresenterWorkflow(Workflow):
         image_md = self._fetch_slide_images(slide_created_events, media_dir)
         slides_dict = {
             ev.slide_index: (
-                f"{tag_slide(ev.content, ev.layout if self.layouts else None)}"
+                f"{tag_slide(ev.content, ev.layout if self.layouts and ev.slide_index > 0 else None)}"
                 f"{image_md.get(ev.slide_index, '')}"
                 f"\n\nNote:\n{ev.narration}\n"
             )

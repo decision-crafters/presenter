@@ -41,8 +41,9 @@ LAYOUT_INSTRUCTION = (
     "\nLAYOUT: you may set `layout` to one of these when the slide's idea fits it "
     "naturally, and then the content MUST follow that layout's shape exactly:\n"
     + "\n".join(f"- {name}: {desc}" for name, desc in LAYOUTS.items())
-    + "\nOtherwise leave `layout` empty for the default layout. Use a layout only "
-    "where it makes the idea clearer, not on every slide, and never on the first slide."
+    + "\nOtherwise leave `layout` empty for the default layout. Most slides should "
+    "use the default: choose a layout only when the idea is genuinely a set of "
+    "parts, a two-way choice, or a measured result, and never on the first slide."
 )
 
 
