@@ -51,6 +51,15 @@ jobs:
             . .venv/bin/activate
             python -m pytest -q
 
+      # The grader the builder never controls (constitution VI): acceptance/
+      # tests from the ruling's grader, every base test ID still present, and
+      # a diff-size summary. No secrets are used or needed.
+      - run:
+          name: Grade (acceptance, base test IDs, diff size)
+          command: |
+            . .venv/bin/activate
+            python scripts/ci_grade.py
+
 workflows:
   version: 2
   test:

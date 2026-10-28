@@ -1,0 +1,16 @@
+# Dependabot is just another author (Invoice Exception Desk playbook, L8):
+# its PRs are graded by the same CircleCI job and merged by a human. No auto-merge.
+# Note: Dependabot cannot update .circleci/config.yml; bump the CI image by hand.
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 3
+    groups:
+      python:
+        patterns: ["*"]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
